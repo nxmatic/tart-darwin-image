@@ -4,7 +4,8 @@ Minimal, owner-focused Tart/Packer project to build a customized Tahoe vanilla i
 
 == Layout
 
-* `templates/vanilla-tahoe.pkr.hcl` — main Packer template
+* `templates/vanilla-tahoe.pkr.hcl` — vanilla/grow-only Packer template
+* `templates/nxmatic-tahoe.pkr.hcl` — nxmatic customization Packer template
 * `scripts/` — provisioning scripts
 * `data/` — launchd plist payloads
 * `docs/runbooks/disk-image-shrink.adoc` — migration runbook for shrinking host disk images on existing VMs
@@ -79,7 +80,7 @@ In short: `Remote Login` is required; macOS `Screen Sharing` is optional.
 
 == Defaults
 
-* VM name: `nxmatic-macos`
+* VM name: `nxmatic-tahoe`
 * Display geometry: `1728x1080`
 * Root disk: `100G`
 * Role disks (ASIF):

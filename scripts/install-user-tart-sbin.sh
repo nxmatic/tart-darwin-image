@@ -20,6 +20,11 @@ if [[ -z "${PRIMARY_HOME}" ]]; then
   PRIMARY_HOME="/Users/${PRIMARY_ACCOUNT_NAME}"
 fi
 
+if [[ "${PRIMARY_ACCOUNT_NAME}" != "admin" && "${PRIMARY_HOME}" == "/Users/admin" ]]; then
+  echo "Warning: primary account home resolved to /Users/admin; using canonical /Users/${PRIMARY_ACCOUNT_NAME} for helper install target."
+  PRIMARY_HOME="/Users/${PRIMARY_ACCOUNT_NAME}"
+fi
+
 TARGET_DIR="${PRIMARY_HOME}/${TART_USER_SBIN_REL_PATH}"
 sudo install -d -m 0755 "${TARGET_DIR}"
 

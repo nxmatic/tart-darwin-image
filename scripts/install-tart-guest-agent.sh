@@ -138,7 +138,7 @@ elif sudo /usr/libexec/PlistBuddy -c "Print :Program" "${UPLOADED_PLIST_PATH}" >
 else
   sudo /usr/libexec/PlistBuddy -c "Add :ProgramArguments array" "${UPLOADED_PLIST_PATH}"
   sudo /usr/libexec/PlistBuddy -c "Add :ProgramArguments:0 string /opt/tart-guest-agent/bin/tart-guest-agent" "${UPLOADED_PLIST_PATH}"
-  sudo /usr/libexec/PlistBuddy -c "Add :ProgramArguments:1 string --run-daemon" "${UPLOADED_PLIST_PATH}"
+  sudo /usr/libexec/PlistBuddy -c "Add :ProgramArguments:1 string --run-agent" "${UPLOADED_PLIST_PATH}"
 fi
 
 : "Resolve primary user home and install launch agent plist into user LaunchAgents location"
@@ -156,7 +156,7 @@ resolve_existing_user() {
   return 1
 }
 
-PRIMARY_USER="$(resolve_existing_user "${PRIMARY_ACCOUNT_NAME:-}" "${TART_GUEST_AGENT_USER:-}" "${SUDO_USER:-}" "${USER:-}" admin || true)"
+PRIMARY_USER="$(resolve_existing_user "${TART_GUEST_AGENT_USER:-}" "${PRIMARY_ACCOUNT_NAME:-}" "${SUDO_USER:-}" "${USER:-}" admin || true)"
 if [[ -z "${PRIMARY_USER}" ]]; then
   echo "Failed to resolve an existing user for tart-guest-agent installation." >&2
   echo "Tried: PRIMARY_ACCOUNT_NAME='${PRIMARY_ACCOUNT_NAME:-}', TART_GUEST_AGENT_USER='${TART_GUEST_AGENT_USER:-}', SUDO_USER='${SUDO_USER:-}', USER='${USER:-}', admin" >&2

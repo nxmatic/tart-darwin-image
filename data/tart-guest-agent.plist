@@ -7,7 +7,7 @@
         <key>ProgramArguments</key>
         <array>
             <string>/opt/tart-guest-agent/bin/tart-guest-agent</string>
-            <string>--run-daemon</string>
+            <string>--run-agent</string>
         </array>
         <key>EnvironmentVariables</key>
         <dict>

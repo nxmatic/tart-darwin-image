@@ -18,6 +18,40 @@ fi
 : "${PRIMARY_ACCOUNT_NAME:=admin}"
 : "${PRIMARY_ACCOUNT_FULL_NAME:=Stephane Lacoin (aka nxmatic)}"
 : "${PRIMARY_ACCOUNT_ALIAS:=nxmatic}"
+: "${AUTO_LOGIN_USER:=${PRIMARY_ACCOUNT_NAME}}"
+: "${DARWIN_ENABLE_BOOT_ARGS:=1}"
+: "${DARWIN_BOOT_ARGS:=-v}"
+
+apply_darwin_boot_args() {
+	local current_boot_args merged_boot_args arg
+
+	if [[ "${DARWIN_ENABLE_BOOT_ARGS}" != "1" ]]; then
+		echo "Skipping NVRAM boot-args management (DARWIN_ENABLE_BOOT_ARGS=${DARWIN_ENABLE_BOOT_ARGS})."
+		return 0
+	fi
+
+	if [[ -z "${DARWIN_BOOT_ARGS}" ]]; then
+		echo "Skipping NVRAM boot-args management (DARWIN_BOOT_ARGS is empty)."
+		return 0
+	fi
+
+	current_boot_args="$(nvram -p 2>/dev/null | awk '$1 == "boot-args" { $1=""; sub(/^ /, ""); print; exit }' || true)"
+	merged_boot_args="${current_boot_args}"
+
+	for arg in ${DARWIN_BOOT_ARGS}; do
+		case " ${merged_boot_args} " in
+			*" ${arg} "*) ;;
+			*) merged_boot_args="${merged_boot_args:+${merged_boot_args} }${arg}" ;;
+		esac
+	done
+
+	if ! sudo nvram boot-args="${merged_boot_args}"; then
+		echo "Warning: failed to set NVRAM boot-args to '${merged_boot_args}'." >&2
+		return 0
+	fi
+
+	echo "Configured NVRAM boot-args: ${merged_boot_args}"
+}
 
 PRIMARY_ACCOUNT_HOME="$(dscl . -read "/Users/${PRIMARY_ACCOUNT_NAME}" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
 if [[ -z "${PRIMARY_ACCOUNT_HOME}" ]]; then
@@ -43,7 +77,7 @@ fi
 : "Enable auto-login"
 : "See https://github.com/xfreebird/kcpassword for details."
 echo '00000000: 1ced 3f4a bcbc ba2c caca 4e82' | sudo xxd -r - /etc/kcpassword
-sudo defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser "${PRIMARY_ACCOUNT_NAME}"
+sudo defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser "${AUTO_LOGIN_USER}"
 
 : "Disable screensaver at login screen"
 sudo defaults write /Library/Preferences/com.apple.screensaver loginWindowIdleTime 0
@@ -53,6 +87,9 @@ defaults -currentHost write com.apple.screensaver idleTime 0
 
 : "Prevent the VM from sleeping"
 sudo systemsetup -setsleep Off 2>/dev/null
+
+: "Configure Darwin boot verbosity / boot-args"
+apply_darwin_boot_args
 
 if [[ "${ENABLE_SAFARI_REMOTE_AUTOMATION}" == "1" ]]; then
 	: "Launch Safari to populate defaults"

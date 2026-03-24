@@ -8,8 +8,8 @@ set -euo pipefail
 : "${FORCE_RERUN:=0}"
 
 : "${NIX_INSTALLER_URL:=https://artifacts.nixos.org/nix-installer}"
-: "${NIX_INSTALLER_PATH:=/private/tmp/nix-installer}"
-: "${NIX_INSTALL_AT_BUILD:=1}"
+: "${NIX_INSTALLER_PATH:=/private/var/tmp/nix-installer}"
+: "${NIX_INSTALL_AT_BUILD:=0}"
 
 if [[ -f "${ENV_POINTER_FILE}" && -z "${MACOS_ENV_FILE:-}" ]]; then
   MACOS_ENV_FILE="$(cat "${ENV_POINTER_FILE}")"

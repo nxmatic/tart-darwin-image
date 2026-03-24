@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-set -x
 
 SCRIPT_DIR="$(realpath "$(dirname "${BASH_SOURCE[0]}")")"
 ENV_FILE="${SCRIPT_DIR}/.envrc"
@@ -12,9 +11,14 @@ if [[ -f "${ENV_FILE}" ]]; then
   source "${ENV_FILE}"
 fi
 
+: "${MACOS_DEBUG_MODE:=1}"
+if [[ "${MACOS_DEBUG_MODE}" == "1" ]]; then
+  set -x
+fi
+
 : "${GIT_STORE_LAYOUT_MODE:=split}"
-: "${GIT_STORE_BARE_ROOT:=/private/var/lib/git/bare}"
-: "${GIT_STORE_WORKTREE_ROOT:=/private/var/lib/git/worktrees}"
+: "${GIT_STORE_BARE_ROOT:=/private/var/lib/git/.bare}"
+: "${GIT_STORE_WORKTREE_ROOT:=/private/var/lib/git}"
 : "${GIT_STORE_MIGRATE_EXISTING:=1}"
 : "${GIT_STORE_PRIMARY_OWNER:=${DATA_HOME_USER:-${PRIMARY_ACCOUNT_NAME:-admin}}}"
 
@@ -79,6 +83,37 @@ ensure_tree_owned() {
   local path="$1"
   if [[ -e "${path}" ]]; then
     sudo chown -R "${GIT_STORE_PRIMARY_OWNER}:staff" "${path}" >/dev/null 2>&1 || true
+  fi
+}
+
+ensure_private_var_lib_root() {
+  local lib_target=""
+  local lib_target_abs=""
+
+  sudo mkdir -p /private/var
+
+  if [[ -L /private/var/lib ]]; then
+    lib_target="$(readlink /private/var/lib || true)"
+    if [[ -n "${lib_target}" ]]; then
+      if [[ "${lib_target}" = /* ]]; then
+        lib_target_abs="${lib_target}"
+      else
+        lib_target_abs="/private/var/${lib_target}"
+      fi
+      sudo mkdir -p "${lib_target_abs}"
+      return 0
+    fi
+  fi
+
+  if [[ ! -e /private/var/lib ]]; then
+    sudo mkdir -p /private/var/lib
+    return 0
+  fi
+
+  if [[ ! -d /private/var/lib ]]; then
+    echo "Warning: /private/var/lib exists but is not a directory; recreating directory root."
+    sudo rm -f /private/var/lib
+    sudo mkdir -p /private/var/lib
   fi
 }
 
@@ -183,15 +218,16 @@ main() {
 
   primary_home="$(resolve_home_dir_for_user "${GIT_STORE_PRIMARY_OWNER}")"
 
+  ensure_private_var_lib_root
   ensure_dir_owned "${GIT_STORE_BARE_ROOT}"
   ensure_dir_owned "${GIT_STORE_WORKTREE_ROOT}"
 
   source_roots=(
+    "/private/var/lib/git/.bare"
+    "/private/var/lib/git"
     "/private/var/lib/git/worktrees"
     "/private/var/lib/git/bare"
     "/private/var/lib/git/Git Store"
-    "/private/var/lib/git"
-    "${primary_home}/Git Worktree Store"
     "${primary_home}/Git Store"
   )
 
