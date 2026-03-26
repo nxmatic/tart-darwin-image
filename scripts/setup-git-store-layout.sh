@@ -2,6 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(realpath "$(dirname "${BASH_SOURCE[0]}")")"
+DSCL_HELPER_LIB="${SCRIPT_DIR}/lib/dscl-plist.sh"
+if [[ -f "${DSCL_HELPER_LIB}" ]]; then
+  # shellcheck disable=SC1091
+  source "${DSCL_HELPER_LIB}"
+fi
 ENV_FILE="${SCRIPT_DIR}/.envrc"
 if [[ ! -f "${ENV_FILE}" && -n "${MACOS_ENV_FILE:-}" ]]; then
   ENV_FILE="${MACOS_ENV_FILE}"
@@ -24,15 +29,11 @@ fi
 
 resolve_home_dir_for_user() {
   local user="$1"
-  local dscl_home
-
-  dscl_home="$(dscl . -read "/Users/${user}" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
-  if [[ -n "${dscl_home}" ]]; then
-    echo "${dscl_home}"
-    return 0
+  if declare -F dscl_user_home_dir >/dev/null 2>&1; then
+    dscl_user_home_dir "${user}"
+  else
+    echo "/Users/${user}"
   fi
-
-  echo "/Users/${user}"
 }
 
 normalize_rel_path() {

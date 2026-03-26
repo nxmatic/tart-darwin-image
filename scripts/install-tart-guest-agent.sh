@@ -3,6 +3,11 @@ set -euo pipefail
 set -x
 
 SCRIPT_DIR="$(realpath "$(dirname "${BASH_SOURCE[0]}")")"
+DSCL_HELPER_LIB="${SCRIPT_DIR}/lib/dscl-plist.sh"
+if [[ -f "${DSCL_HELPER_LIB}" ]]; then
+  # shellcheck disable=SC1091
+  source "${DSCL_HELPER_LIB}"
+fi
 ENV_FILE="${SCRIPT_DIR}/.envrc"
 if [[ ! -f "${ENV_FILE}" && -n "${MACOS_ENV_FILE:-}" ]]; then
   ENV_FILE="${MACOS_ENV_FILE}"
@@ -70,48 +75,56 @@ if [[ -z "${BIN_PATH}" ]]; then
   exit 1
 fi
 
-: "Install binary into /opt/tart-guest-agent/bin"
-sudo install -d -m 0755 /opt/tart-guest-agent/bin
-sudo install -m 0755 "${BIN_PATH}" /opt/tart-guest-agent/bin/tart-guest-agent
-test -x /opt/tart-guest-agent/bin/tart-guest-agent
+: "Install binary into /opt/tart/bin"
+sudo install -d -m 0755 /opt/tart/bin
+sudo install -m 0755 "${BIN_PATH}" /opt/tart/bin/tart-guest-agent
+test -x /opt/tart/bin/tart-guest-agent
 
-: "Resolve uploaded launch agent plist path (can vary with communicator user/home)"
-resolve_uploaded_plist() {
-  local candidate
-  for candidate in \
-    "${HOME:-}/tart-guest-agent.plist" \
-    "/Users/${SUDO_USER:-}/tart-guest-agent.plist" \
-    "/Users/${USER:-}/tart-guest-agent.plist" \
-    "/Users/admin/tart-guest-agent.plist"; do
-    if [[ -n "${candidate}" && -f "${candidate}" ]]; then
-      printf '%s\n' "${candidate}"
-      return 0
-    fi
-  done
-  return 1
-}
+: "Install split launchd services: RPC and clipboard"
+RPC_LABEL="org.cirruslabs.tart-guest-rpc"
+CLIPBOARD_LABEL="org.cirruslabs.tart-guest-clipboard"
+RPC_DAEMON_PATH="/Library/LaunchDaemons/${RPC_LABEL}.plist"
+CLIPBOARD_AGENT_PATH="/Library/LaunchAgents/${CLIPBOARD_LABEL}.plist"
+TART_AGENT_USER="${TART_GUEST_AGENT_USER:-${AUTO_LOGIN_USER:-admin}}"
+TART_AGENT_UID="$(id -u "${TART_AGENT_USER}" 2>/dev/null || true)"
+TART_AGENT_HOME="$(dscl . -read "/Users/${TART_AGENT_USER}" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
+if [[ -z "${TART_AGENT_HOME}" ]]; then
+  TART_AGENT_HOME="/Users/${TART_AGENT_USER}"
+fi
 
-UPLOADED_PLIST_PATH="$(resolve_uploaded_plist || true)"
+RUNTIME_PATH_VALUE="/opt/tart/bin:/run/wrappers/bin:/run/current-system/sw/bin:/bin:/usr/bin:/usr/sbin:/usr/local/bin"
+RPC_LOG_PATH="/var/log/tart-guest-rpc.log"
+CLIPBOARD_LOG_PATH="/var/log/tart-guest-clipboard.log"
 
-if [[ -z "${UPLOADED_PLIST_PATH}" ]]; then
-  : "Fallback: synthesize a valid launch agent plist when upload path is unavailable"
-  UPLOADED_PLIST_PATH="${TMP_DIR}/tart-guest-agent.plist"
-  cat > "${UPLOADED_PLIST_PATH}" <<'EOF'
+: "Prepare log files in /var/log"
+sudo install -d -m 0755 /var/log
+sudo touch "${RPC_LOG_PATH}" "${CLIPBOARD_LOG_PATH}"
+sudo chown root:wheel "${RPC_LOG_PATH}"
+sudo chmod 0644 "${RPC_LOG_PATH}"
+if [[ -n "${TART_AGENT_UID}" ]]; then
+  sudo chown "${TART_AGENT_USER}":staff "${CLIPBOARD_LOG_PATH}" || true
+else
+  sudo chown root:wheel "${CLIPBOARD_LOG_PATH}"
+fi
+sudo chmod 0644 "${CLIPBOARD_LOG_PATH}"
+
+: "Generate RPC launch daemon plist"
+cat > "${TMP_DIR}/tart-guest-rpc.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>org.cirruslabs.tart-guest-agent</string>
+    <string>${RPC_LABEL}</string>
     <key>ProgramArguments</key>
     <array>
-      <string>/opt/tart-guest-agent/bin/tart-guest-agent</string>
-      <string>--run-daemon</string>
+      <string>/opt/tart/bin/tart-guest-agent</string>
+      <string>--run-rpc</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
       <key>PATH</key>
-      <string>/opt/tart-guest-agent/bin:/run/wrappers/bin:/run/current-system/sw/bin:/bin:/usr/bin:/usr/sbin:/usr/local/bin</string>
+      <string>${RUNTIME_PATH_VALUE}</string>
     </dict>
     <key>WorkingDirectory</key>
     <string>/var/empty</string>
@@ -120,92 +133,90 @@ if [[ -z "${UPLOADED_PLIST_PATH}" ]]; then
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/tart-guest-agent.log</string>
+    <string>${RPC_LOG_PATH}</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/tart-guest-agent.log</string>
+    <string>${RPC_LOG_PATH}</string>
   </dict>
 </plist>
 EOF
-fi
 
-: "Patch launch agent plist to match install location"
-if sudo /usr/libexec/PlistBuddy -c "Print :ProgramArguments:0" "${UPLOADED_PLIST_PATH}" >/dev/null 2>&1; then
-  sudo /usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 /opt/tart-guest-agent/bin/tart-guest-agent" "${UPLOADED_PLIST_PATH}"
-elif sudo /usr/libexec/PlistBuddy -c "Print :ProgramArguments" "${UPLOADED_PLIST_PATH}" >/dev/null 2>&1; then
-  sudo /usr/libexec/PlistBuddy -c "Add :ProgramArguments:0 string /opt/tart-guest-agent/bin/tart-guest-agent" "${UPLOADED_PLIST_PATH}"
-elif sudo /usr/libexec/PlistBuddy -c "Print :Program" "${UPLOADED_PLIST_PATH}" >/dev/null 2>&1; then
-  sudo /usr/libexec/PlistBuddy -c "Set :Program /opt/tart-guest-agent/bin/tart-guest-agent" "${UPLOADED_PLIST_PATH}"
+: "Generate clipboard launch agent plist"
+cat > "${TMP_DIR}/tart-guest-clipboard.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>${CLIPBOARD_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/opt/tart/bin/tart-guest-agent</string>
+      <string>--run-vdagent</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PATH</key>
+      <string>${RUNTIME_PATH_VALUE}</string>
+      <key>TERM</key>
+      <string>xterm-256color</string>
+    </dict>
+    <key>WorkingDirectory</key>
+    <string>${TART_AGENT_HOME}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${CLIPBOARD_LOG_PATH}</string>
+    <key>StandardErrorPath</key>
+    <string>${CLIPBOARD_LOG_PATH}</string>
+  </dict>
+</plist>
+EOF
+
+: "Install system daemon and global agent plists"
+sudo install -d -m 0755 /Library/LaunchDaemons /Library/LaunchAgents
+sudo install -m 0644 "${TMP_DIR}/tart-guest-rpc.plist" "${RPC_DAEMON_PATH}"
+sudo install -m 0644 "${TMP_DIR}/tart-guest-clipboard.plist" "${CLIPBOARD_AGENT_PATH}"
+sudo chown root:wheel "${RPC_DAEMON_PATH}" "${CLIPBOARD_AGENT_PATH}"
+
+: "Validate plist syntax"
+sudo plutil -lint "${RPC_DAEMON_PATH}"
+sudo plutil -lint "${CLIPBOARD_AGENT_PATH}"
+
+: "Restart RPC service in system domain"
+sudo launchctl bootout "system/${RPC_LABEL}" >/dev/null 2>&1 || true
+sudo launchctl bootstrap system "${RPC_DAEMON_PATH}"
+sudo launchctl enable "system/${RPC_LABEL}" || true
+sudo launchctl kickstart -k "system/${RPC_LABEL}" || true
+
+: "Restart clipboard service in GUI domain when user domain is available"
+if [[ -n "${TART_AGENT_UID}" ]]; then
+  sudo launchctl bootout "gui/${TART_AGENT_UID}/${CLIPBOARD_LABEL}" >/dev/null 2>&1 || true
+  sudo launchctl bootstrap "gui/${TART_AGENT_UID}" "${CLIPBOARD_AGENT_PATH}" || true
+  sudo launchctl enable "gui/${TART_AGENT_UID}/${CLIPBOARD_LABEL}" || true
+  sudo launchctl kickstart -k "gui/${TART_AGENT_UID}/${CLIPBOARD_LABEL}" || true
 else
-  sudo /usr/libexec/PlistBuddy -c "Add :ProgramArguments array" "${UPLOADED_PLIST_PATH}"
-  sudo /usr/libexec/PlistBuddy -c "Add :ProgramArguments:0 string /opt/tart-guest-agent/bin/tart-guest-agent" "${UPLOADED_PLIST_PATH}"
-  sudo /usr/libexec/PlistBuddy -c "Add :ProgramArguments:1 string --run-agent" "${UPLOADED_PLIST_PATH}"
+  echo "WARNING: Could not resolve UID for ${TART_AGENT_USER}; installed ${CLIPBOARD_AGENT_PATH} but skipped runtime bootstrap."
 fi
 
-: "Resolve primary user home and install launch agent plist into user LaunchAgents location"
-resolve_existing_user() {
-  local candidate
-  for candidate in "$@"; do
-    if [[ -z "${candidate}" ]]; then
-      continue
-    fi
-    if dscl . -read "/Users/${candidate}" >/dev/null 2>&1; then
-      printf '%s\n' "${candidate}"
-      return 0
-    fi
-  done
-  return 1
-}
+: "Best-effort cleanup of legacy single-service guest-agent units"
+for legacy_label in org.cirruslabs.tart-guest-agent org.cirruslabs.tart-guest-daemon; do
+  sudo launchctl bootout "system/${legacy_label}" >/dev/null 2>&1 || true
+done
 
-PRIMARY_USER="$(resolve_existing_user "${TART_GUEST_AGENT_USER:-}" "${PRIMARY_ACCOUNT_NAME:-}" "${SUDO_USER:-}" "${USER:-}" admin || true)"
-if [[ -z "${PRIMARY_USER}" ]]; then
-  echo "Failed to resolve an existing user for tart-guest-agent installation." >&2
-  echo "Tried: PRIMARY_ACCOUNT_NAME='${PRIMARY_ACCOUNT_NAME:-}', TART_GUEST_AGENT_USER='${TART_GUEST_AGENT_USER:-}', SUDO_USER='${SUDO_USER:-}', USER='${USER:-}', admin" >&2
-  exit 1
-fi
+for legacy_plist in \
+  /Library/LaunchDaemons/org.cirruslabs.tart-guest-agent.plist \
+  /Library/LaunchDaemons/org.cirruslabs.tart-guest-daemon.plist \
+  /Library/LaunchAgents/org.cirruslabs.tart-guest-agent.plist; do
+  if [[ -f "${legacy_plist}" ]]; then
+    sudo rm -f "${legacy_plist}"
+  fi
+done
 
-PRIMARY_HOME="$(dscl . -read "/Users/${PRIMARY_USER}" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
-if [[ -z "${PRIMARY_HOME}" ]]; then
-  PRIMARY_HOME="/Users/${PRIMARY_USER}"
-fi
-LAUNCH_AGENT_PATH="${PRIMARY_HOME}/Library/LaunchAgents/org.cirruslabs.tart-guest-agent.plist"
-
-sudo install -d -m 0755 "${PRIMARY_HOME}/Library/LaunchAgents"
-sudo mv "${UPLOADED_PLIST_PATH}" "${LAUNCH_AGENT_PATH}"
-sudo chown "${PRIMARY_USER}:staff" "${LAUNCH_AGENT_PATH}"
-sudo chmod 0644 "${LAUNCH_AGENT_PATH}"
-
-: "Patch working directory to primary user home"
-sudo /usr/libexec/PlistBuddy -c "Set :WorkingDirectory ${PRIMARY_HOME}" "${LAUNCH_AGENT_PATH}"
-
-: "Validate launch agent plist syntax"
-sudo plutil -lint "${LAUNCH_AGENT_PATH}"
-
-: "Resolve target user/domain and bootstrap launch agent"
-TARGET_USER="$(resolve_existing_user "${TART_GUEST_AGENT_USER:-}" "${PRIMARY_USER}" || true)"
-if [[ -z "${TARGET_USER}" ]]; then
-  echo "Failed to resolve target user for launchctl bootstrap." >&2
-  echo "Tried: TART_GUEST_AGENT_USER='${TART_GUEST_AGENT_USER:-}', PRIMARY_USER='${PRIMARY_USER}'" >&2
-  exit 1
-fi
-
-TARGET_UID="$(id -u "${TARGET_USER}")"
-DOMAIN="gui/${TARGET_UID}"
-if ! sudo launchctl print "${DOMAIN}" >/dev/null 2>&1; then
-  DOMAIN="user/${TARGET_UID}"
-fi
-
-sudo launchctl bootout "${DOMAIN}/org.cirruslabs.tart-guest-agent" >/dev/null 2>&1 || true
-sudo launchctl bootstrap "${DOMAIN}" "${LAUNCH_AGENT_PATH}"
-sudo launchctl enable "${DOMAIN}/org.cirruslabs.tart-guest-agent" || true
-sudo launchctl kickstart -k "${DOMAIN}/org.cirruslabs.tart-guest-agent" || true
-
-: "Best-effort cleanup of legacy system daemon if present"
-sudo launchctl bootout system/org.cirruslabs.tart-guest-daemon >/dev/null 2>&1 || true
-if [[ -f /Library/LaunchDaemons/org.cirruslabs.tart-guest-daemon.plist ]]; then
-  sudo rm -f /Library/LaunchDaemons/org.cirruslabs.tart-guest-daemon.plist
-fi
-
-: "Best-effort cleanup of global LaunchAgents copy if present"
-if [[ -f /Library/LaunchAgents/org.cirruslabs.tart-guest-agent.plist ]]; then
-  sudo rm -f /Library/LaunchAgents/org.cirruslabs.tart-guest-agent.plist
-fi
+for user_home in /Users/*; do
+  [[ -d "${user_home}/Library/LaunchAgents" ]] || continue
+  if [[ -f "${user_home}/Library/LaunchAgents/org.cirruslabs.tart-guest-agent.plist" ]]; then
+    sudo rm -f "${user_home}/Library/LaunchAgents/org.cirruslabs.tart-guest-agent.plist"
+  fi
+done

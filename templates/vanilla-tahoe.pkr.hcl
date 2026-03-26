@@ -186,6 +186,30 @@ variable "macos_primary_account_alias" {
   description = "Optional additional short-name alias."
 }
 
+variable "macos_secondary_admin_name" {
+  type        = string
+  default     = "super"
+  description = "Secondary admin account short name used for recovery/autologin and prerequisite checks."
+}
+
+variable "macos_secondary_admin_password" {
+  type        = string
+  default     = "super"
+  description = "Secondary admin account password used during account/token maintenance."
+}
+
+variable "macos_system_admin_name" {
+  type        = string
+  default     = "admin"
+  description = "Canonical token-authority admin short name used for non-interactive SecureToken operations."
+}
+
+variable "macos_system_admin_password" {
+  type        = string
+  default     = "admin"
+  description = "Canonical token-authority admin password used for non-interactive SecureToken operations."
+}
+
 variable "macos_primary_account_expected_uid" {
   type        = number
   default     = 501
@@ -266,7 +290,7 @@ variable "nix_installer_url" {
 
 variable "nix_installer_path" {
   type        = string
-  default     = "/Users/nxmatic/.tart/sbin/nix-installer"
+  default     = "/opt/tart/sbin/nix-installer"
   description = "Path inside the VM where the Nix installer script is staged."
 }
 
@@ -292,6 +316,12 @@ variable "enable_boot_command" {
   type        = bool
   default     = false
   description = "Whether to run automated macOS setup keystrokes (boot_command)."
+}
+
+variable "enable_vnc_url_probe" {
+  type        = bool
+  default     = false
+  description = "Whether to run a harmless minimal VNC boot command (<wait1s>) so the plugin emits the VNC URL even when full boot automation is disabled."
 }
 
 variable "system_container_size_gb" {
@@ -336,8 +366,10 @@ variable "recovery_partition_mode" {
 
 locals {
   use_ipsw                     = var.macos_build_source_mode == "ipsw"
-  macos_bootstrap_ssh_username = var.macos_bootstrap_ssh_username != "" ? var.macos_bootstrap_ssh_username : (local.use_ipsw ? var.macos_primary_account_name : "admin")
-  macos_bootstrap_ssh_password = var.macos_bootstrap_ssh_password != "" ? var.macos_bootstrap_ssh_password : "admin"
+  system_admin_name            = trimspace(var.macos_system_admin_name) != "" ? trimspace(var.macos_system_admin_name) : "admin"
+  system_admin_password        = var.macos_system_admin_password != "" ? var.macos_system_admin_password : "admin"
+  macos_bootstrap_ssh_username = var.macos_bootstrap_ssh_username != "" ? var.macos_bootstrap_ssh_username : (local.use_ipsw ? var.macos_primary_account_name : local.system_admin_name)
+  macos_bootstrap_ssh_password = var.macos_bootstrap_ssh_password != "" ? var.macos_bootstrap_ssh_password : local.system_admin_password
 }
 
 source "tart-cli" "tart" {
@@ -348,7 +380,7 @@ source "tart-cli" "tart" {
   memory_gb    = 32
   display      = "1728x1080"
   headless     = !var.enable_build_console
-  disable_vnc  = true
+  disable_vnc  = false
   disk_size_gb = var.root_disk_size_gb
   disk_format  = var.root_disk_format
   ssh_password = local.macos_bootstrap_ssh_password
@@ -360,7 +392,7 @@ source "tart-cli" "tart" {
   run_extra_args = []
   boot_command = var.enable_boot_command ? [
     "<wait40s><spacebar>",
-  ] : []
+  ] : (var.enable_vnc_url_probe ? ["<wait1s>"] : [])
   create_grace_time   = "15s"
   recovery_partition  = var.recovery_partition_mode
 }
@@ -378,7 +410,7 @@ build {
   provisioner "shell" {
     inline = [
       "set -euo pipefail",
-      "printf '%s\\n' 'admin' | sudo -S -p '' bash -c \"install -d -m 0750 /etc/sudoers.d && printf '%s\\n' '${local.macos_bootstrap_ssh_username} ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/99-packer-nopasswd && chmod 0440 /etc/sudoers.d/99-packer-nopasswd\"",
+      "printf '%s\\n' '${local.system_admin_password}' | sudo -S -p '' bash -c \"install -d -m 0750 /etc/sudoers.d && printf '%s\\n' '${local.macos_bootstrap_ssh_username} ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/99-packer-nopasswd && chmod 0440 /etc/sudoers.d/99-packer-nopasswd\"",
       "sudo -n -l >/dev/null",
     ]
   }

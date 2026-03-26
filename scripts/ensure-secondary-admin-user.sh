@@ -20,7 +20,7 @@ fi
 : "${SECONDARY_ADMIN_HOME:=/Users/super}"
 : "${SECONDARY_ADMIN_PASSWORD:=super}"
 : "${SYSTEM_ADMIN_NAME:=admin}"
-: "${SYSTEM_ADMIN_PASSWORD:=${PRIMARY_ACCOUNT_PASSWORD}}"
+: "${SYSTEM_ADMIN_PASSWORD:=admin}"
 : "${SECONDARY_ADMIN_REQUIRE_SECURE_TOKEN:=1}"
 : "${SECONDARY_ADMIN_HOME_MODE:=700}"
 : "${SECONDARY_ADMIN_STRIP_ACL:=1}"
@@ -28,7 +28,7 @@ fi
 : "${SECONDARY_ADMIN_STRIP_XATTRS:=0}"
 
 grant_secondary_secure_token() {
-  local token_status token_admin_user token_admin_password
+  local token_status token_admin_status
 
   if [[ "${SECONDARY_ADMIN_REQUIRE_SECURE_TOKEN}" != "1" ]]; then
     echo "Skipping secondary SecureToken grant (SECONDARY_ADMIN_REQUIRE_SECURE_TOKEN=${SECONDARY_ADMIN_REQUIRE_SECURE_TOKEN})."
@@ -41,25 +41,19 @@ grant_secondary_secure_token() {
     return 0
   fi
 
-  token_admin_user="${SYSTEM_ADMIN_NAME}"
-  token_admin_password="${SYSTEM_ADMIN_PASSWORD}"
-  if ! dscl . -read "/Users/${token_admin_user}" >/dev/null 2>&1; then
-    token_admin_user="${PRIMARY_ACCOUNT_NAME}"
-    token_admin_password="${PRIMARY_ACCOUNT_PASSWORD}"
-  fi
-
-  if [[ "${token_admin_user}" == "${SECONDARY_ADMIN_NAME}" ]]; then
-    echo "Warning: token grant admin user resolves to secondary account itself; skipping SecureToken grant for ${SECONDARY_ADMIN_NAME}." >&2
+  if ! dscl . -read "/Users/${SYSTEM_ADMIN_NAME}" >/dev/null 2>&1; then
+    echo "Warning: token-authority admin user '${SYSTEM_ADMIN_NAME}' is missing; skipping SecureToken grant for ${SECONDARY_ADMIN_NAME}." >&2
     return 0
   fi
 
-  if ! dscl . -read "/Users/${token_admin_user}" >/dev/null 2>&1; then
-    echo "Warning: no viable token grant admin user found (tried ${SYSTEM_ADMIN_NAME} then ${PRIMARY_ACCOUNT_NAME}); skipping SecureToken grant for ${SECONDARY_ADMIN_NAME}." >&2
+  token_admin_status="$(sysadminctl -secureTokenStatus "${SYSTEM_ADMIN_NAME}" 2>&1 || true)"
+  if ! grep -qi "ENABLED" <<<"${token_admin_status}"; then
+    echo "Warning: token-authority admin user '${SYSTEM_ADMIN_NAME}' does not have SecureToken enabled; skipping SecureToken grant for ${SECONDARY_ADMIN_NAME}." >&2
     return 0
   fi
 
-  echo "Granting SecureToken to ${SECONDARY_ADMIN_NAME} using ${token_admin_user}."
-  sysadminctl -adminUser "${token_admin_user}" -adminPassword "${token_admin_password}" -secureTokenOn "${SECONDARY_ADMIN_NAME}" -password "${SECONDARY_ADMIN_PASSWORD}" >/dev/null 2>&1 || true
+  echo "Granting SecureToken to ${SECONDARY_ADMIN_NAME} using ${SYSTEM_ADMIN_NAME}."
+  sysadminctl -adminUser "${SYSTEM_ADMIN_NAME}" -adminPassword "${SYSTEM_ADMIN_PASSWORD}" -secureTokenOn "${SECONDARY_ADMIN_NAME}" -password "${SECONDARY_ADMIN_PASSWORD}" >/dev/null 2>&1 || true
 
   token_status="$(sysadminctl -secureTokenStatus "${SECONDARY_ADMIN_NAME}" 2>&1 || true)"
   if grep -qi "ENABLED" <<<"${token_status}"; then

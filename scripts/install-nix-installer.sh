@@ -2,6 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(realpath "$(dirname "${BASH_SOURCE[0]}")")"
+DSCL_HELPER_LIB="${SCRIPT_DIR}/lib/dscl-plist.sh"
+if [[ -f "${DSCL_HELPER_LIB}" ]]; then
+  # shellcheck disable=SC1091
+  source "${DSCL_HELPER_LIB}"
+fi
 ENV_FILE="${SCRIPT_DIR}/.envrc"
 if [[ ! -f "${ENV_FILE}" && -n "${MACOS_ENV_FILE:-}" ]]; then
   ENV_FILE="${MACOS_ENV_FILE}"
@@ -36,7 +41,7 @@ fi
 : "${NIX_BOOTSTRAP_USER:=${DATA_HOME_USER:-${PRIMARY_ACCOUNT_NAME:-}}}"
 : "${SECONDARY_ADMIN_NAME:=super}"
 : "${NIX_TRUSTED_USERS:=root ${SECONDARY_ADMIN_NAME} ${PRIMARY_ACCOUNT_NAME:-nxmatic}}"
-: "${NIX_BOOTSTRAP_SBIN_REL_PATH:=.tart/sbin}"
+: "${NIX_BOOTSTRAP_SBIN_REL_PATH:=/opt/tart/sbin}"
 
 normalize_trusted_users() {
   local current_users="$1"
@@ -52,15 +57,11 @@ NIX_TRUSTED_USERS="$(normalize_trusted_users "${NIX_TRUSTED_USERS}" "${SECONDARY
 
 resolve_home_dir_for_user() {
   local user="$1"
-  local dscl_home
-
-  dscl_home="$(dscl . -read "/Users/${user}" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
-  if [[ -n "${dscl_home}" ]]; then
-    echo "${dscl_home}"
-    return 0
+  if declare -F dscl_user_home_dir >/dev/null 2>&1; then
+    dscl_user_home_dir "${user}"
+  else
+    echo "/Users/${user}"
   fi
-
-  echo "/Users/${user}"
 }
 
 NIX_BOOTSTRAP_HOME="$(resolve_home_dir_for_user "${NIX_BOOTSTRAP_USER}")"
@@ -69,7 +70,11 @@ if [[ "${NIX_BOOTSTRAP_USER}" != "admin" && "${NIX_BOOTSTRAP_HOME}" == "/Users/a
   NIX_BOOTSTRAP_HOME="/Users/${NIX_BOOTSTRAP_USER}"
 fi
 
-: "${NIX_BOOTSTRAP_SBIN_DIR:=${NIX_BOOTSTRAP_HOME}/${NIX_BOOTSTRAP_SBIN_REL_PATH}}"
+if [[ "${NIX_BOOTSTRAP_SBIN_REL_PATH}" == /* ]]; then
+  : "${NIX_BOOTSTRAP_SBIN_DIR:=${NIX_BOOTSTRAP_SBIN_REL_PATH}}"
+else
+  : "${NIX_BOOTSTRAP_SBIN_DIR:=${NIX_BOOTSTRAP_HOME}/${NIX_BOOTSTRAP_SBIN_REL_PATH}}"
+fi
 : "${NIX_INSTALLER_PATH:=${NIX_BOOTSTRAP_SBIN_DIR}/nix-installer}"
 : "${NIX_BOOTSTRAP_SCRIPT_PATH:=${NIX_BOOTSTRAP_SBIN_DIR}/install-nix-bootstrap}"
 : "${NIX_BOOTSTRAP_ENV_PATH:=${NIX_BOOTSTRAP_SBIN_DIR}/install-nix-bootstrap.env}"

@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(realpath "$(dirname "${BASH_SOURCE[0]}")")"
+DSCL_HELPER_LIB="${SCRIPT_DIR}/lib/dscl-plist.sh"
+if [[ -f "${DSCL_HELPER_LIB}" ]]; then
+  # shellcheck disable=SC1091
+  source "${DSCL_HELPER_LIB}"
+fi
+
 : "${MACOS_DEBUG_MODE:=1}"
 if [[ "${MACOS_DEBUG_MODE}" == "1" ]]; then
   set -x
@@ -14,14 +21,14 @@ fi
 : "${BUILD_CHAINS_DISK_INITIAL_SIZE_GB:=16}"
 : "${VM_IMAGES_DISK_INITIAL_SIZE_GB:=120}"
 : "${DATA_HOME_USER:=${PRIMARY_ACCOUNT_NAME:-nxmatic}}"
-: "${DATA_DISK_HOME_NAME:=Data-Home-${DATA_HOME_USER:-nxmatic}}"
-: "${DATA_DISK_LIBRARY_CACHE_NAME:=Data Library Cache ${DATA_HOME_USER:-nxmatic}}"
-: "${DATA_DISK_VM_IMAGES_NAME:=Data VM Images ${DATA_HOME_USER:-nxmatic}}"
-: "${DATA_DISK_BUILD_CHAINS_CACHE_NAME:=Data Build Chains Cache ${DATA_HOME_USER:-nxmatic}}"
+: "${DATA_DISK_HOME_NAME:=${DATA_HOME_USER:-nxmatic} Users}"
+: "${DATA_DISK_LIBRARY_CACHE_NAME:=${DATA_HOME_USER:-nxmatic} Library Cache}"
+: "${DATA_DISK_VM_IMAGES_NAME:=${DATA_HOME_USER:-nxmatic} VM Images}"
+: "${DATA_DISK_BUILD_CHAINS_CACHE_NAME:=${DATA_HOME_USER:-nxmatic} Build Chains Cache}"
 : "${DATA_DISK_GIT_STORE_NAME:=Git Store}"
 : "${DATA_DISK_GIT_BARE_STORE_NAME:=Git Bare Store}"
 : "${DATA_DISK_NIX_STORE_NAME:=Nix Store}"
-: "${DATA_HOME_VOLUME_PREFIX:=Data-${DATA_HOME_USER:-nxmatic}}"
+: "${DATA_HOME_VOLUME_PREFIX:=${DATA_HOME_USER:-nxmatic}}"
 : "${DATA_HOME_USERS_SUBVOLUME_PREFIX:=Home}"
 : "${DATA_HOME_SYSTEM_SUBVOLUME_NAME:=System}"
 : "${DATA_RELOCATE_LIBRARY:=0}"
@@ -63,15 +70,11 @@ resolve_data_home_user() {
 
 resolve_home_dir_for_user() {
   local user="$1"
-  local dscl_home
-
-  dscl_home="$(dscl . -read "/Users/${user}" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
-  if [[ -n "${dscl_home}" ]]; then
-    echo "${dscl_home}"
-    return 0
+  if declare -F dscl_user_home_dir >/dev/null 2>&1; then
+    dscl_user_home_dir "${user}"
+  else
+    echo "/Users/${user}"
   fi
-
-  echo "/Users/${user}"
 }
 
 sanitize_volume_component() {
@@ -348,7 +351,11 @@ if [[ "${DATA_SET_PRIMARY_HOME_ON_DATA_VOLUME}" == "1" ]]; then
   DESIRED_HOME="${DATA_EFFECTIVE_USERS_ROOT}/${DATA_HOME_USER}"
 
   if dscl . -read "${PRIMARY_RECORD_PATH}" >/dev/null 2>&1; then
-    CURRENT_HOME="$(dscl . -read "${PRIMARY_RECORD_PATH}" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
+    if declare -F dscl_plist_first_attr >/dev/null 2>&1; then
+      CURRENT_HOME="$(dscl_plist_first_attr "${PRIMARY_RECORD_PATH}" "NFSHomeDirectory" || true)"
+    else
+      CURRENT_HOME=""
+    fi
 
     sudo mkdir -p "${DESIRED_HOME}"
     sudo chown -R "${DATA_HOME_USER}:staff" "${DESIRED_HOME}" >/dev/null 2>&1 || true
@@ -399,7 +406,7 @@ fi
 if [[ "${DATA_COPY_GIT_STORE}" == "1" ]]; then
   if [[ -n "${GIT_BARE_STORE_MOUNT_POINT:-}" ]]; then
     SRC_GIT_BARE_STORE="/private/var/lib/git/bare"
-    DST_GIT_BARE_STORE="${GIT_BARE_STORE_MOUNT_POINT}/bare"
+    DST_GIT_BARE_STORE="${GIT_BARE_STORE_MOUNT_POINT}"
     if [[ -d "${SRC_GIT_BARE_STORE}" ]]; then
       sudo mkdir -p "${DST_GIT_BARE_STORE}"
       sudo ditto "${SRC_GIT_BARE_STORE}" "${DST_GIT_BARE_STORE}" || true
@@ -409,7 +416,7 @@ if [[ "${DATA_COPY_GIT_STORE}" == "1" ]]; then
 
   if [[ -n "${GIT_STORE_DATA_MOUNT_POINT:-}" ]]; then
     SRC_GIT_WORKTREE_STORE="/private/var/lib/git/worktrees"
-    DST_GIT_WORKTREE_STORE="${GIT_STORE_DATA_MOUNT_POINT}/worktrees"
+    DST_GIT_WORKTREE_STORE="${GIT_STORE_DATA_MOUNT_POINT}"
     if [[ -d "${SRC_GIT_WORKTREE_STORE}" ]]; then
       sudo mkdir -p "${DST_GIT_WORKTREE_STORE}"
       sudo ditto "${SRC_GIT_WORKTREE_STORE}" "${DST_GIT_WORKTREE_STORE}" || true
@@ -418,7 +425,7 @@ if [[ "${DATA_COPY_GIT_STORE}" == "1" ]]; then
 
     for LEGACY_GIT_STORE_SRC in "/private/var/lib/git/Git Store" "${ACTUAL_HOME_DIR}/Git Store"; do
       if [[ -d "${LEGACY_GIT_STORE_SRC}" ]]; then
-        LEGACY_GIT_STORE_DST="${GIT_STORE_DATA_MOUNT_POINT}/Git Store"
+        LEGACY_GIT_STORE_DST="${GIT_STORE_DATA_MOUNT_POINT}"
         sudo mkdir -p "${LEGACY_GIT_STORE_DST}"
         sudo ditto "${LEGACY_GIT_STORE_SRC}" "${LEGACY_GIT_STORE_DST}" || true
         echo "Legacy Git Store copy complete (best-effort): ${LEGACY_GIT_STORE_SRC} -> ${LEGACY_GIT_STORE_DST}"
@@ -429,8 +436,8 @@ fi
 
 if [[ "${GIT_STORE_CONFIGURE_SYSTEM_MOUNT}" == "1" ]]; then
   if [[ -n "${GIT_BARE_STORE_MOUNT_POINT:-}" && -n "${GIT_STORE_DATA_MOUNT_POINT:-}" ]]; then
-    GIT_WORKTREE_CANONICAL_ROOT="${GIT_STORE_DATA_MOUNT_POINT}/worktrees"
-    GIT_BARE_CANONICAL_ROOT="${GIT_BARE_STORE_MOUNT_POINT}/bare"
+    GIT_WORKTREE_CANONICAL_ROOT="${GIT_STORE_DATA_MOUNT_POINT}"
+    GIT_BARE_CANONICAL_ROOT="${GIT_BARE_STORE_MOUNT_POINT}"
     sudo mkdir -p "${GIT_WORKTREE_CANONICAL_ROOT}" "${GIT_BARE_CANONICAL_ROOT}"
 
     # Migrate legacy root content into worktree canonical root when present.
@@ -439,7 +446,8 @@ if [[ "${GIT_STORE_CONFIGURE_SYSTEM_MOUNT}" == "1" ]]; then
       sudo rm -rf "${GIT_STORE_SYSTEM_MOUNT_POINT}"
     fi
 
-    # Maintain compatibility with old split layout source paths, but normalize to .bare model.
+    # Maintain compatibility with old split layout source paths while normalizing
+    # to direct role-disk roots (+ .bare symlink model).
     if [[ -d "${GIT_STORE_SYSTEM_MOUNT_POINT}/bare" && ! -L "${GIT_STORE_SYSTEM_MOUNT_POINT}/bare" ]]; then
       sudo ditto "${GIT_STORE_SYSTEM_MOUNT_POINT}/bare" "${GIT_BARE_CANONICAL_ROOT}" || true
       sudo rm -rf "${GIT_STORE_SYSTEM_MOUNT_POINT}/bare"
@@ -451,9 +459,9 @@ if [[ "${GIT_STORE_CONFIGURE_SYSTEM_MOUNT}" == "1" ]]; then
 
     sudo ln -sfn "${GIT_WORKTREE_CANONICAL_ROOT}" "${GIT_STORE_SYSTEM_MOUNT_POINT}"
 
-    if [[ -d "${GIT_WORKTREE_CANONICAL_ROOT}/.bare" && ! -L "${GIT_WORKTREE_CANONICAL_ROOT}/.bare" ]]; then
-      sudo ditto "${GIT_WORKTREE_CANONICAL_ROOT}/.bare" "${GIT_BARE_CANONICAL_ROOT}" || true
-      sudo rm -rf "${GIT_WORKTREE_CANONICAL_ROOT}/.bare"
+    if [[ -d "${GIT_STORE_SYSTEM_MOUNT_POINT}/.bare" && ! -L "${GIT_STORE_SYSTEM_MOUNT_POINT}/.bare" ]]; then
+      sudo ditto "${GIT_STORE_SYSTEM_MOUNT_POINT}/.bare" "${GIT_BARE_CANONICAL_ROOT}" || true
+      sudo rm -rf "${GIT_STORE_SYSTEM_MOUNT_POINT}/.bare"
     fi
     sudo ln -sfn "${GIT_BARE_CANONICAL_ROOT}" "${GIT_WORKTREE_CANONICAL_ROOT}/.bare"
 

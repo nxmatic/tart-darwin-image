@@ -5,18 +5,16 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 # Tooling
-FLOX ?= flox
-.flox.activate.cmd ?= $(FLOX) activate --
 TART_HOME ?= .tart
 TART_FOREIGN_HOME ?= .tart.foreign
 .tart.home ?= $(strip $(TART_HOME))
 .tart.home.foreign ?= $(strip $(TART_FOREIGN_HOME))
-.packer.cmd ?= $(.flox.activate.cmd) packer
-.tart.cmd ?= $(.flox.activate.cmd) tart
+.packer.cmd ?= packer
+.tart.cmd ?= tart
 .env.file ?= .env
 -include $(.env.file)
 
-TART_WORKING_VM ?= nikopol+next
+TART_WORKING_VM ?= nikopol
 TART_EXTRA_DISKS_ADD_RENAMED ?= 0
 TART_EXTRA_DISKS_RENAMED_FROM_VM ?= nikopol
 
@@ -94,6 +92,8 @@ endef
 .account.primary-expected-uid ?= 501
 .account.secondary-name ?= super
 .account.secondary-password ?= super
+.account.system-admin-name ?= admin
+.account.system-admin-password ?= admin
 .auto-login.user ?= $(if $(call opt-enabled,.debug),$(.account.secondary-name),$(.account.primary-name))
 .data.home-user ?= $(.account.primary-name)
 .bootstrap.ssh.user ?=
@@ -161,6 +161,10 @@ endef
 .tart.run.extra-disks.renamed.from-vm ?= $(TART_EXTRA_DISKS_RENAMED_FROM_VM)
 .tart.run.extra-disk.opts ?= sync=none
 .tart.run.extra-args ?=
+.rm.skip-owned-disks-when-add-renamed ?= 1
+
+# Foreign/local rename source selection
+.tart.disk.rename.home ?= $(.tart.home.foreign)
 
 # Host-side ASIF volume rename controls
 .tart.disk.path ?=
@@ -250,7 +254,7 @@ $(notdir $(.tart.disk.vm-images.image-path.effective))
 .tart.run.extra-disks.from-vm.paths.effective := $(if $(call opt-enabled,.tart.run.extra-disks.allow-duplicate-roles),$(.tart.run.extra-disks.from-vm.paths),$(.tart.run.extra-disks.from-vm.paths.filtered))
 .tart.run.extra-disks.effective := $(strip $(.tart.run.extra-disks))
 
-.tart.vm.name.paths := $(sort $(wildcard $(.tart.home)/disks/$(.tart.vm.name)/*.asif))
+.tart.vm.name.paths := $(sort $(wildcard $(.tart.disk.rename.home)/disks/$(.tart.vm.name)/*.asif))
 .tart.vm.name.paths.relative := $(patsubst $(CURDIR)/%,%,$(.tart.vm.name.paths))
 .tart.vm.name.paths.rename-targets := $(addsuffix ~rename,$(.tart.vm.name.paths.relative))
 .tart.vm.names.rm-runtime-targets := $(addsuffix ~rm-runtime,$(.tart.vm.names))
@@ -265,12 +269,16 @@ define .packer.vars.full
 -var vm_base_name=$(.tart.base.ref)
 -var tart_home=$(.tart.home)
 -var provision_profile=$(.provision.profile)
--var enable_build_console=$(call to-bool,$(.debug))
+-var enable_build_console=$(call to-bool,$(.interactive))
 -var macos_primary_account_name=$(.account.primary-name)
 -var 'macos_primary_account_full_name=$(.account.primary-full-name)'
 -var macos_primary_account_alias=$(.account.primary-alias)
 -var 'macos_primary_account_password=$(.account.primary-password)'
 -var macos_primary_account_expected_uid=$(.account.primary-expected-uid)
+-var macos_secondary_admin_name=$(.account.secondary-name)
+-var 'macos_secondary_admin_password=$(.account.secondary-password)'
+-var macos_system_admin_name=$(.account.system-admin-name)
+-var 'macos_system_admin_password=$(.account.system-admin-password)'
 -var macos_debug_mode=$(call to-bool,$(.debug))
 -var macos_auto_login_user=$(.auto-login.user)
 -var macos_bootstrap_ssh_username=$(.bootstrap.ssh.user)
@@ -300,6 +308,7 @@ define .packer.vars.full
 -var user_build_chains_cache_disk_max_size_gb=$(.tart.disk.user-build-chains-cache.max-size-gb)
 -var user_vm_images_disk_max_size_gb=$(.tart.disk.vm-images.max-size-gb)
 -var enable_boot_command=$(.enable-boot-command)
+-var enable_vnc_url_probe=$(call to-bool,$(.interactive))
 -var attach_data_disk_during_build=$(call to-bool,$(.attach-data-disk-during-build))
 -var user_data_disk_image_path=$(.tart.disk.user.image-path.effective)
 -var user_library_disk_image_path=$(.tart.disk.user-library.image-path.effective)
@@ -314,14 +323,18 @@ define .packer.vars.grow
 -var vm_name=$(.tart.vm.name)
 -var vm_base_name=$(.tart.base.ref)
 -var tart_home=$(.tart.home)
--var enable_build_console=$(call to-bool,$(.debug))
+-var enable_build_console=$(call to-bool,$(.interactive))
 -var recovery_partition_mode=$(.recovery.partition.mode)
 -var root_disk_format=$(.tart.disk.root.format)
 -var root_disk_size_gb=$(.tart.disk.root.max-size-gb)
 -var enable_boot_command=$(.enable-boot-command)
+-var enable_vnc_url_probe=$(call to-bool,$(.interactive))
+-var macos_secondary_admin_name=$(.account.secondary-name)
+-var 'macos_secondary_admin_password=$(.account.secondary-password)'
+-var macos_system_admin_name=$(.account.system-admin-name)
+-var 'macos_system_admin_password=$(.account.system-admin-password)'
 -var macos_bootstrap_ssh_username=$(.bootstrap.ssh.user)
 -var macos_bootstrap_ssh_password=$(.bootstrap.ssh.password)
--var enable_boot_command=$(.enable-boot-command)
 endef
 
 define .packer.vars.active
@@ -351,19 +364,30 @@ if [[ -z "$${from_vm_name}" && "$(.tart.run.extra-disks.add-renamed)" == "1" ]];
 	auto_renamed_mode=1
 fi
 if [[ -n "$${from_vm_name}" ]]; then
-	from_vm_dir="$(.tart.home)/disks/$${from_vm_name}"
+	from_vm_local_dir="$(.tart.home)/disks/$${from_vm_name}"
+	from_vm_foreign_dir="$(.tart.home.foreign)/disks/$${from_vm_name}"
 	scan_dir=""
 	scan_pattern="*.asif"
-	if [[ -d "$${from_vm_dir}" ]]; then
-		scan_dir="$${from_vm_dir}"
-		if [[ "$$auto_renamed_mode" == "1" ]]; then
-			scan_pattern="$${from_vm_name} - *.asif"
+	if [[ "$$auto_renamed_mode" == "1" ]]; then
+		scan_pattern="$${from_vm_name} - *.asif"
+		if [[ -d "$${from_vm_foreign_dir}" ]]; then
+			scan_dir="$${from_vm_foreign_dir}"
+		elif [[ -d "$${from_vm_local_dir}" ]]; then
+			scan_dir="$${from_vm_local_dir}"
+		else
+			fallback_foreign_dir="$(.tart.home.foreign)/disks/$(.tart.vm.name)"
+			fallback_local_dir="$(.tart.home)/disks/$(.tart.vm.name)"
+			if [[ -d "$${fallback_foreign_dir}" ]]; then
+				scan_dir="$${fallback_foreign_dir}"
+			elif [[ -d "$${fallback_local_dir}" ]]; then
+				scan_dir="$${fallback_local_dir}"
+			fi
 		fi
 	else
-		fallback_dir="$(.tart.home)/disks/$(.tart.vm.name)"
-		if [[ -d "$${fallback_dir}" ]]; then
-			scan_dir="$${fallback_dir}"
-			scan_pattern="$${from_vm_name} - *.asif"
+		if [[ -d "$${from_vm_local_dir}" ]]; then
+			scan_dir="$${from_vm_local_dir}"
+		elif [[ -d "$${from_vm_foreign_dir}" ]]; then
+			scan_dir="$${from_vm_foreign_dir}"
 		fi
 	fi
 	if [[ -n "$${scan_dir}" ]]; then
@@ -681,13 +705,26 @@ if [[ "$(.dry-run.disk.effective)" != "1" ]]; then
 fi
 endef
 
+define .vm.state.fragment.write
+printf '%s\n' \
+	'apiVersion: nxmatic.dev/v1alpha1' \
+	'kind: VmStateFragment' \
+	'vm:' \
+	'  name: "$(1)"' \
+	'  path: "$(2)"' \
+	'state:' \
+	'  stage: "$(3)"' \
+	'  profile: "$(4)"' \
+	"  generated_at: \"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\"" > "$@"
+endef
+
 .PHONY: help validate validate-packer validate-tart clone-from-vanilla ensure-root-disk-size prepare-disks check-prefixed-role-disks build build-rootfs build-image build-system-only build-with-role-disks build-nix-store-volume build-nix-install build-nxmatic build-super-token-refresh stage-grow stage-nix-store-volume stage-nix-install stage-nxmatic stage-super-token-refresh stage1 stage2 stage3 stage4 stage5 run run-console run-recovery-console info disks-info rename-disk-volume rename-disk-volumes rename-disk-attached-volumes apfs-ownership-policy rm-runtime rm-runtime-one rm-role-disks rm-role-disks-one rm-owned-role-disks init-foreign-home rm refresh-console shell-fmt shell-check fmt FORCE
 
 # Curated set of targets shown by `make help`
 .help.targets ?= help validate validate-packer validate-tart build stage1 stage2 stage3 stage4 stage5 build-with-role-disks run run-console run-recovery-console info disks-info rename-disk-volumes rename-disk-attached-volumes apfs-ownership-policy init-foreign-home refresh-console rm rm-runtime rm-role-disks shell-fmt shell-check fmt
 
 # Curated set of command-line variables shown by `make help`
-.help.vars ?= .interactive .debug .experimental .skip .dry-run .dry-run.tart .dry-run.disk .dry-run.packer .dry-run.apfs.ownership .tart.vm.name .tart.vm.names .tart.rm.vm.name .tart.base.ref .provision.profile .attach-data-disk-during-build .tart.disk.recreate .tart.clone.force .tart.disk.source-vm .tart.disk.prefix.owner .tart.disk.prefix.enforce .tart.run.recovery .tart.run.vnc .tart.run.net-bridged .tart.run.extra-disks .tart.run.extra-disks.from-vm .tart.run.extra-disks.allow-duplicate-roles .tart.run.extra-disk.opts .tart.vm.name .tart.disk.path .tart.disk.path.rename .tart.disk.name .tart.disk.volume-devs .apfs.ownership.mode .apfs.ownership.all-roles .apfs.ownership.include-system-mounts .apfs.ownership.images .account.primary-name .account.secondary-name .auto-login.user TART_HOME TART_FOREIGN_HOME
+.help.vars ?= .interactive .debug .experimental .skip .dry-run .dry-run.tart .dry-run.disk .dry-run.packer .dry-run.apfs.ownership .tart.vm.name .tart.vm.names .tart.rm.vm.name .tart.base.ref .provision.profile .attach-data-disk-during-build .tart.disk.recreate .tart.clone.force .tart.disk.source-vm .tart.disk.prefix.owner .tart.disk.prefix.enforce .tart.disk.rename.home .tart.run.recovery .tart.run.vnc .tart.run.net-bridged .tart.run.extra-disks .tart.run.extra-disks.from-vm .tart.run.extra-disks.allow-duplicate-roles .tart.run.extra-disk.opts .rm.skip-owned-disks-when-add-renamed .tart.disk.path .tart.disk.path.rename .tart.disk.name .tart.disk.volume-devs .apfs.ownership.mode .apfs.ownership.all-roles .apfs.ownership.include-system-mounts .apfs.ownership.images .account.primary-name .account.secondary-name .auto-login.user TART_HOME TART_FOREIGN_HOME
 
 .help.vars += TART_EXTRA_DISKS_ADD_RENAMED TART_EXTRA_DISKS_RENAMED_FROM_VM
 
@@ -758,10 +795,10 @@ ifneq ($(call opt-enabled,.attach-data-disk-during-build),)
 	$(call .tart.disk.cmd.ensure-parent,$(.tart.disk.nix-store.image-path.effective))
 	$(call .tart.disk.cmd.ensure-parent,$(.tart.disk.user-build-chains-cache.image-path.effective))
 	$(call .tart.disk.cmd.ensure-parent,$(.tart.disk.vm-images.image-path.effective))
-	$(call .tart.disk.cmd.prepare-image,Data-Home-$(.data.home-user),$(.tart.disk.user.image-path.effective),$(.tart.disk.user.max-size-gb))
-	$(call .tart.disk.cmd.prepare-image,Data Build Chains Cache $(.data.home-user),$(.tart.disk.user-build-chains-cache.image-path.effective),$(.tart.disk.user-build-chains-cache.max-size-gb))
-	$(call .tart.disk.cmd.prepare-image,Data Library Cache $(.data.home-user),$(.tart.disk.user-library.image-path.effective),$(.tart.disk.user-library.max-size-gb))
-	$(call .tart.disk.cmd.prepare-image,Data VM Images $(.data.home-user),$(.tart.disk.vm-images.image-path.effective),$(.tart.disk.vm-images.max-size-gb))
+	$(call .tart.disk.cmd.prepare-image,$(.data.home-user) Users,$(.tart.disk.user.image-path.effective),$(.tart.disk.user.max-size-gb))
+	$(call .tart.disk.cmd.prepare-image,$(.data.home-user) Build Chains Cache,$(.tart.disk.user-build-chains-cache.image-path.effective),$(.tart.disk.user-build-chains-cache.max-size-gb))
+	$(call .tart.disk.cmd.prepare-image,$(.data.home-user) Library Cache,$(.tart.disk.user-library.image-path.effective),$(.tart.disk.user-library.max-size-gb))
+	$(call .tart.disk.cmd.prepare-image,$(.data.home-user) VM Images,$(.tart.disk.vm-images.image-path.effective),$(.tart.disk.vm-images.max-size-gb))
 	$(call .tart.disk.cmd.prepare-image,Git Store,$(.tart.disk.git-store.image-path.effective),$(.tart.disk.git-store.max-size-gb))
 	$(call .tart.disk.cmd.prepare-image,Git Bare Store,$(.tart.disk.git-bare-store.image-path.effective),$(.tart.disk.git-bare-store.max-size-gb))
 	$(call .tart.disk.cmd.prepare-image,Nix Store,$(.tart.disk.nix-store.image-path.effective),$(.tart.disk.nix-store.max-size-gb))
@@ -783,16 +820,7 @@ $(.tart.stage1.vm.path): ## Ensure stage1 VM artifact exists (bootstraps via bui
 
 $(.tart.stage1.vm.state): $(.tart.stage1.vm.path) ## Track stage1 VM artifact readiness state
 	if [[ -d "$(.tart.stage1.vm.path)" ]]; then
-		printf '%s\n' \
-			'apiVersion: nxmatic.dev/v1alpha1' \
-			'kind: VmStateFragment' \
-			'vm:' \
-			'  name: "$(.tart.stage1-vm.name)"' \
-			'  path: "$(.tart.stage1.vm.path)"' \
-			'state:' \
-			'  stage: "stage1"' \
-			'  profile: "grow"' \
-			"  generated_at: \"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\"" > "$@"
+		$(call .vm.state.fragment.write,$(.tart.stage1-vm.name),$(.tart.stage1.vm.path),stage1,grow)
 		: "Updated stage1 VM state: $@"
 	else
 		: "Stage1 VM path missing unexpectedly: $(.tart.stage1.vm.path)"
@@ -811,16 +839,7 @@ $(.tart.stage2.vm.path): $(.tart.stage1.vm.state) ## Ensure stage2 VM artifact e
 
 $(.tart.stage2.vm.state): $(.tart.stage2.vm.path) ## Track stage2 VM artifact readiness state
 	if [[ -d "$(.tart.stage2.vm.path)" ]]; then
-		printf '%s\n' \
-			'apiVersion: nxmatic.dev/v1alpha1' \
-			'kind: VmStateFragment' \
-			'vm:' \
-			'  name: "$(.tart.stage2-vm.name)"' \
-			'  path: "$(.tart.stage2.vm.path)"' \
-			'state:' \
-			'  stage: "stage2"' \
-			'  profile: "nix-store-volume"' \
-			"  generated_at: \"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\"" > "$@"
+		$(call .vm.state.fragment.write,$(.tart.stage2-vm.name),$(.tart.stage2.vm.path),stage2,nix-store-volume)
 		: "Updated stage2 VM state: $@"
 	else
 		: "Stage2 VM path missing unexpectedly: $(.tart.stage2.vm.path)"
@@ -837,16 +856,7 @@ $(.tart.stage3.vm.path): $(.tart.stage2.vm.state) ## Ensure stage3 VM artifact e
 
 $(.tart.stage3.vm.state): $(.tart.stage3.vm.path) ## Track stage3 VM artifact readiness state
 	if [[ -d "$(.tart.stage3.vm.path)" ]]; then
-		printf '%s\n' \
-			'apiVersion: nxmatic.dev/v1alpha1' \
-			'kind: VmStateFragment' \
-			'vm:' \
-			'  name: "$(.tart.stage3-vm.name)"' \
-			'  path: "$(.tart.stage3.vm.path)"' \
-			'state:' \
-			'  stage: "stage3"' \
-			'  profile: "nix-install"' \
-			"  generated_at: \"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\"" > "$@"
+		$(call .vm.state.fragment.write,$(.tart.stage3-vm.name),$(.tart.stage3.vm.path),stage3,nix-install)
 		: "Updated stage3 VM state: $@"
 	else
 		: "Stage3 VM path missing unexpectedly: $(.tart.stage3.vm.path)"
@@ -863,16 +873,7 @@ $(.tart.stage4.vm.path): $(.tart.stage3.vm.state) ## Ensure stage4 VM artifact e
 
 $(.tart.stage4.vm.state): $(.tart.stage4.vm.path) ## Track stage4 VM artifact readiness state
 	if [[ -d "$(.tart.stage4.vm.path)" ]]; then
-		printf '%s\n' \
-			'apiVersion: nxmatic.dev/v1alpha1' \
-			'kind: VmStateFragment' \
-			'vm:' \
-			'  name: "$(.tart.stage4-vm.name)"' \
-			'  path: "$(.tart.stage4.vm.path)"' \
-			'state:' \
-			'  stage: "stage4"' \
-			'  profile: "nxmatic"' \
-			"  generated_at: \"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\"" > "$@"
+		$(call .vm.state.fragment.write,$(.tart.stage4-vm.name),$(.tart.stage4.vm.path),stage4,nxmatic)
 		: "Updated stage4 VM state: $@"
 	else
 		: "Stage4 VM path missing unexpectedly: $(.tart.stage4.vm.path)"
@@ -881,16 +882,7 @@ $(.tart.stage4.vm.state): $(.tart.stage4.vm.path) ## Track stage4 VM artifact re
 
 $(.tart.final.vm.state): $(.tart.vm.path) ## Track final VM artifact readiness state
 	if [[ -d "$(.tart.vm.path)" ]]; then
-		printf '%s\n' \
-			'apiVersion: nxmatic.dev/v1alpha1' \
-			'kind: VmStateFragment' \
-			'vm:' \
-			'  name: "$(.tart.vm.name)"' \
-			'  path: "$(.tart.vm.path)"' \
-			'state:' \
-			'  stage: "final"' \
-			'  profile: "super-token-refresh"' \
-			"  generated_at: \"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\"" > "$@"
+		$(call .vm.state.fragment.write,$(.tart.vm.name),$(.tart.vm.path),final,super-token-refresh)
 		: "Updated final VM state: $@"
 	else
 		: "Final VM path missing unexpectedly: $(.tart.vm.path)"
@@ -1046,7 +1038,7 @@ rename-disk-volumes-check:
 		exit 2
 	fi
 	if [[ -z "$(strip $(.tart.vm.name.paths))" ]]; then
-		echo "No ASIF images found under .tart/disks/$(.tart.vm.name)" >&2
+		echo "No ASIF images found under $(.tart.disk.rename.home)/disks/$(.tart.vm.name)" >&2
 		exit 2
 	fi
 
@@ -1105,6 +1097,10 @@ rm: ## Remove runtime/artifact for .tart.rm.vm.name; remove only owned role disk
 	if [[ " $(.skip) " == *" disks "* ]]; then
 		: "Skipping role disk removal because .skip includes 'disks'."
 		: "VM $(.tart.rm.vm.name): removed runtime/artifact; skipped owned role disks (.skip includes 'disks')."
+	elif [[ "$(.tart.run.extra-disks.add-renamed)" == "1" && "$(.rm.skip-owned-disks-when-add-renamed)" == "1" ]]; then
+		: "Skipping role disk removal because renamed-disk mode is enabled (.tart.run.extra-disks.add-renamed=1)."
+		: "Set .rm.skip-owned-disks-when-add-renamed=0 to allow owned-role-disk deletion explicitly."
+		: "VM $(.tart.rm.vm.name): removed runtime/artifact; preserved owned role disks by safety guard."
 	else
 		$(MAKE) rm-owned-role-disks .tart.vm.name="$(.tart.rm.vm.name)"
 		: "VM $(.tart.rm.vm.name): removed runtime/artifact and owned role disks only."

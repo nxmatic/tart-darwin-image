@@ -3,6 +3,11 @@ set -euo pipefail
 set -x
 
 SCRIPT_DIR="$(realpath "$(dirname "${BASH_SOURCE[0]}")")"
+DSCL_HELPER_LIB="${SCRIPT_DIR}/lib/dscl-plist.sh"
+if [[ -f "${DSCL_HELPER_LIB}" ]]; then
+  # shellcheck disable=SC1091
+  source "${DSCL_HELPER_LIB}"
+fi
 ENV_FILE="${SCRIPT_DIR}/.envrc"
 if [[ ! -f "${ENV_FILE}" && -n "${MACOS_ENV_FILE:-}" ]]; then
   ENV_FILE="${MACOS_ENV_FILE}"
@@ -13,10 +18,11 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 : "${PRIMARY_ACCOUNT_NAME:=admin}"
-: "${TART_USER_SBIN_REL_PATH:=.tart/sbin}"
+: "${TART_USER_SBIN_REL_PATH:=/opt/tart/sbin}"
 
-PRIMARY_HOME="$(dscl . -read "/Users/${PRIMARY_ACCOUNT_NAME}" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
-if [[ -z "${PRIMARY_HOME}" ]]; then
+if declare -F dscl_user_home_dir >/dev/null 2>&1; then
+  PRIMARY_HOME="$(dscl_user_home_dir "${PRIMARY_ACCOUNT_NAME}")"
+else
   PRIMARY_HOME="/Users/${PRIMARY_ACCOUNT_NAME}"
 fi
 
@@ -25,7 +31,11 @@ if [[ "${PRIMARY_ACCOUNT_NAME}" != "admin" && "${PRIMARY_HOME}" == "/Users/admin
   PRIMARY_HOME="/Users/${PRIMARY_ACCOUNT_NAME}"
 fi
 
-TARGET_DIR="${PRIMARY_HOME}/${TART_USER_SBIN_REL_PATH}"
+if [[ "${TART_USER_SBIN_REL_PATH}" == /* ]]; then
+  TARGET_DIR="${TART_USER_SBIN_REL_PATH}"
+else
+  TARGET_DIR="${PRIMARY_HOME}/${TART_USER_SBIN_REL_PATH}"
+fi
 sudo install -d -m 0755 "${TARGET_DIR}"
 
 install_helper() {

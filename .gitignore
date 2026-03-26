@@ -2,3 +2,7 @@
 
 # Project-local Tart state
 .tart/
+.tart.foreign/
+
+# Local Copilot scratch artifacts
+.github/copilot.d/tmp/

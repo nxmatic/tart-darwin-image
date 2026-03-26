@@ -3,6 +3,11 @@ set -euo pipefail
 set -x
 
 SCRIPT_DIR="$(realpath "$(dirname "${BASH_SOURCE[0]}")")"
+DSCL_HELPER_LIB="${SCRIPT_DIR}/lib/dscl-plist.sh"
+if [[ -f "${DSCL_HELPER_LIB}" ]]; then
+	# shellcheck disable=SC1091
+	source "${DSCL_HELPER_LIB}"
+fi
 ENV_FILE="${SCRIPT_DIR}/.envrc"
 if [[ ! -f "${ENV_FILE}" && -n "${MACOS_ENV_FILE:-}" ]]; then
 	ENV_FILE="${MACOS_ENV_FILE}"
@@ -53,8 +58,9 @@ apply_darwin_boot_args() {
 	echo "Configured NVRAM boot-args: ${merged_boot_args}"
 }
 
-PRIMARY_ACCOUNT_HOME="$(dscl . -read "/Users/${PRIMARY_ACCOUNT_NAME}" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
-if [[ -z "${PRIMARY_ACCOUNT_HOME}" ]]; then
+if declare -F dscl_user_home_dir >/dev/null 2>&1; then
+	PRIMARY_ACCOUNT_HOME="$(dscl_user_home_dir "${PRIMARY_ACCOUNT_NAME}")"
+else
 	PRIMARY_ACCOUNT_HOME="/Users/${PRIMARY_ACCOUNT_NAME}"
 fi
 

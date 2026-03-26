@@ -3,6 +3,11 @@ set -euo pipefail
 set -x
 
 SCRIPT_DIR="$(realpath "$(dirname "${BASH_SOURCE[0]}")")"
+DSCL_HELPER_LIB="${SCRIPT_DIR}/lib/dscl-plist.sh"
+if [[ -f "${DSCL_HELPER_LIB}" ]]; then
+  # shellcheck disable=SC1091
+  source "${DSCL_HELPER_LIB}"
+fi
 ENV_FILE="${SCRIPT_DIR}/.envrc"
 if [[ ! -f "${ENV_FILE}" && -n "${MACOS_ENV_FILE:-}" ]]; then
   ENV_FILE="${MACOS_ENV_FILE}"
@@ -21,6 +26,8 @@ fi
 : "${PRIMARY_ACCOUNT_PASSWORD:=nxmatic}"
 : "${SECONDARY_ADMIN_NAME:=super}"
 : "${SECONDARY_ADMIN_PASSWORD:=super}"
+: "${SYSTEM_ADMIN_NAME:=admin}"
+: "${SYSTEM_ADMIN_PASSWORD:=admin}"
 : "${PRIMARY_SECURE_TOKEN_REFRESH:=1}"
 
 resolve_primary_record_path() {
@@ -52,7 +59,11 @@ reconcile_primary_home_and_login() {
     exit 1
   fi
 
-  current_home="$(dscl . -read "${primary_record_path}" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
+  if declare -F dscl_plist_first_attr >/dev/null 2>&1; then
+    current_home="$(dscl_plist_first_attr "${primary_record_path}" "NFSHomeDirectory" || true)"
+  else
+    current_home=""
+  fi
 
   if [[ -z "${current_home}" ]]; then
     current_home="${desired_home}"
@@ -85,7 +96,7 @@ ensure_primary_admin_membership() {
 }
 
 ensure_primary_secure_token() {
-  local token_status
+  local token_status system_admin_token_status
 
   token_status="$(sysadminctl -secureTokenStatus "${PRIMARY_ACCOUNT_NAME}" 2>&1 || true)"
   if grep -qi "ENABLED" <<<"${token_status}" && [[ "${PRIMARY_SECURE_TOKEN_REFRESH}" != "1" ]]; then
@@ -94,11 +105,23 @@ ensure_primary_secure_token() {
   fi
 
   if grep -qi "ENABLED" <<<"${token_status}"; then
-    echo "SecureToken already enabled for ${PRIMARY_ACCOUNT_NAME}; forcing refresh using ${SECONDARY_ADMIN_NAME}."
+    echo "SecureToken already enabled for ${PRIMARY_ACCOUNT_NAME}; forcing refresh using ${SYSTEM_ADMIN_NAME}."
   else
-    echo "Warning: SecureToken not enabled for ${PRIMARY_ACCOUNT_NAME}; attempting recovery using ${SECONDARY_ADMIN_NAME}."
+    echo "Warning: SecureToken not enabled for ${PRIMARY_ACCOUNT_NAME}; attempting recovery using ${SYSTEM_ADMIN_NAME}."
   fi
-  sysadminctl -adminUser "${SECONDARY_ADMIN_NAME}" -adminPassword "${SECONDARY_ADMIN_PASSWORD}" -secureTokenOn "${PRIMARY_ACCOUNT_NAME}" -password "${PRIMARY_ACCOUNT_PASSWORD}" >/dev/null 2>&1 || true
+
+  if ! dscl . -read "/Users/${SYSTEM_ADMIN_NAME}" >/dev/null 2>&1; then
+    echo "Warning: token-authority admin user '${SYSTEM_ADMIN_NAME}' is missing; skipping SecureToken recovery for ${PRIMARY_ACCOUNT_NAME}." >&2
+    return 0
+  fi
+
+  system_admin_token_status="$(sysadminctl -secureTokenStatus "${SYSTEM_ADMIN_NAME}" 2>&1 || true)"
+  if ! grep -qi "ENABLED" <<<"${system_admin_token_status}"; then
+    echo "Warning: token-authority admin user '${SYSTEM_ADMIN_NAME}' does not have SecureToken enabled; skipping SecureToken recovery for ${PRIMARY_ACCOUNT_NAME}." >&2
+    return 0
+  fi
+
+  sysadminctl -adminUser "${SYSTEM_ADMIN_NAME}" -adminPassword "${SYSTEM_ADMIN_PASSWORD}" -secureTokenOn "${PRIMARY_ACCOUNT_NAME}" -password "${PRIMARY_ACCOUNT_PASSWORD}" >/dev/null 2>&1 || true
 
   token_status="$(sysadminctl -secureTokenStatus "${PRIMARY_ACCOUNT_NAME}" 2>&1 || true)"
   if grep -qi "ENABLED" <<<"${token_status}"; then
@@ -121,7 +144,11 @@ verify_primary_uid() {
     exit 1
   fi
 
-  uid="$(dscl . -read "${effective_record_path}" UniqueID 2>/dev/null | awk '{print $2}' || true)"
+  if declare -F dscl_plist_first_attr >/dev/null 2>&1; then
+    uid="$(dscl_plist_first_attr "${effective_record_path}" "UniqueID" || true)"
+  else
+    uid=""
+  fi
 
   if [[ -z "${uid}" ]]; then
     uid="$(id -u "${PRIMARY_ACCOUNT_NAME}" 2>/dev/null || true)"
@@ -140,7 +167,7 @@ verify_primary_uid() {
 }
 
 verify_primary_account_state() {
-  local effective_record_path desired_home effective_home effective_full_name token_status
+  local effective_record_path desired_home effective_home effective_full_name token_status line
 
   if ! effective_record_path="$(resolve_primary_record_path)"; then
     echo "Error: unable to resolve effective record path for primary account '${PRIMARY_ACCOUNT_NAME}'." >&2
@@ -148,7 +175,11 @@ verify_primary_account_state() {
   fi
 
   desired_home="/Users/${PRIMARY_ACCOUNT_NAME}"
-  effective_home="$(dscl . -read "${effective_record_path}" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
+  if declare -F dscl_plist_first_attr >/dev/null 2>&1; then
+    effective_home="$(dscl_plist_first_attr "${effective_record_path}" "NFSHomeDirectory" || true)"
+  else
+    effective_home=""
+  fi
   if [[ -z "${effective_home}" ]]; then
     echo "Error: missing NFSHomeDirectory for '${PRIMARY_ACCOUNT_NAME}' (record=${effective_record_path})." >&2
     exit 1
@@ -158,19 +189,15 @@ verify_primary_account_state() {
     exit 1
   fi
 
-  effective_full_name="$(
-    dscl . -read "${effective_record_path}" RealName 2>/dev/null \
-      | awk '
-          /^RealName:/ {
-            sub(/^RealName:[[:space:]]*/, "", $0)
-            if (length($0)) print $0
-            next
-          }
-          { print }
-        ' \
-      | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' \
-      | awk 'NF { out = out (out ? " " : "") $0 } END { print out }'
-  )"
+  if declare -F dscl_user_real_name >/dev/null 2>&1; then
+    effective_full_name=""
+    while IFS= read -r line; do
+      [[ -z "${line}" ]] && continue
+      effective_full_name="${effective_full_name:+${effective_full_name} }${line}"
+    done < <(dscl_plist_attr_values "${effective_record_path}" "RealName" || true)
+  else
+    effective_full_name=""
+  fi
   if [[ -z "${effective_full_name}" ]]; then
     echo "Error: missing RealName for '${PRIMARY_ACCOUNT_NAME}' (record=${effective_record_path})." >&2
     exit 1
@@ -217,14 +244,20 @@ create_primary_account_from_admin() {
   local old_home desired_home target_uid existing_record_names admin_uid spare_uid
 
   desired_home="/Users/${PRIMARY_ACCOUNT_NAME}"
-  old_home="$(dscl . -read /Users/admin NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
+  if declare -F dscl_plist_first_attr >/dev/null 2>&1; then
+    old_home="$(dscl_plist_first_attr "/Users/admin" "NFSHomeDirectory" || true)"
+  else
+    old_home=""
+  fi
   if [[ -z "${old_home}" ]]; then
     old_home="/Users/admin"
   fi
 
   target_uid="${PRIMARY_ACCOUNT_EXPECTED_UID}"
   if [[ -z "${target_uid}" || "${target_uid}" -le 0 ]]; then
-    target_uid="$(dscl . -read /Users/admin UniqueID 2>/dev/null | awk '{print $2}' || true)"
+    if declare -F dscl_plist_first_attr >/dev/null 2>&1; then
+      target_uid="$(dscl_plist_first_attr "/Users/admin" "UniqueID" || true)"
+    fi
   fi
   if [[ -z "${target_uid}" || "${target_uid}" -le 0 ]]; then
     target_uid="501"
@@ -236,10 +269,14 @@ create_primary_account_from_admin() {
     fi
   fi
 
-  admin_uid="$(dscl . -read /Users/admin UniqueID 2>/dev/null | awk '{print $2}' || true)"
+  if declare -F dscl_plist_first_attr >/dev/null 2>&1; then
+    admin_uid="$(dscl_plist_first_attr "/Users/admin" "UniqueID" || true)"
+  else
+    admin_uid=""
+  fi
   if [[ -n "${admin_uid}" && "${admin_uid}" == "${target_uid}" ]]; then
     spare_uid=502
-    while dscl . -list /Users UniqueID 2>/dev/null | awk '{print $2}' | grep -qx "${spare_uid}"; do
+    while dscl . -list /Users UniqueID 2>/dev/null | tr -s ' ' | cut -d ' ' -f2 | grep -qx "${spare_uid}"; do
       spare_uid=$((spare_uid + 1))
     done
     echo "Reassigning legacy admin UID from ${admin_uid} to ${spare_uid} so ${PRIMARY_ACCOUNT_NAME} can take UID ${target_uid}."

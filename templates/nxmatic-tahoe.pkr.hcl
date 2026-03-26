@@ -247,6 +247,18 @@ variable "macos_primary_account_password" {
   description = "Primary account password used for account/token maintenance during provisioning."
 }
 
+variable "macos_system_admin_name" {
+  type        = string
+  default     = "admin"
+  description = "Canonical token-authority admin short name used for non-interactive SecureToken operations."
+}
+
+variable "macos_system_admin_password" {
+  type        = string
+  default     = "admin"
+  description = "Canonical token-authority admin password used for non-interactive SecureToken operations."
+}
+
 variable "macos_primary_account_expected_uid" {
   type        = number
   default     = 501
@@ -255,6 +267,18 @@ variable "macos_primary_account_expected_uid" {
     condition     = var.macos_primary_account_expected_uid >= 0
     error_message = "Macos_primary_account_expected_uid must be greater than or equal to 0 (0 disables UID validation)."
   }
+}
+
+variable "macos_secondary_admin_name" {
+  type        = string
+  default     = "super"
+  description = "Secondary admin account short name used for recovery/autologin and prerequisite checks."
+}
+
+variable "macos_secondary_admin_password" {
+  type        = string
+  default     = "super"
+  description = "Secondary admin account password used during account/token maintenance."
 }
 
 variable "macos_auto_login_user" {
@@ -343,7 +367,7 @@ variable "nix_installer_url" {
 
 variable "nix_installer_path" {
   type        = string
-  default     = "/Users/nxmatic/.tart/sbin/nix-installer"
+  default     = "/opt/tart/sbin/nix-installer"
   description = "Path inside the VM where the Nix installer script is staged."
 }
 
@@ -365,8 +389,10 @@ variable "provision_profile" {
 
 locals {
   use_ipsw                             = var.macos_build_source_mode == "ipsw"
-  macos_bootstrap_ssh_username         = var.macos_bootstrap_ssh_username != "" ? var.macos_bootstrap_ssh_username : (local.use_ipsw ? var.macos_primary_account_name : "admin")
-  macos_bootstrap_ssh_password         = var.macos_bootstrap_ssh_password != "" ? var.macos_bootstrap_ssh_password : "admin"
+  system_admin_name                    = trimspace(var.macos_system_admin_name) != "" ? trimspace(var.macos_system_admin_name) : "admin"
+  system_admin_password                = var.macos_system_admin_password != "" ? var.macos_system_admin_password : "admin"
+  macos_bootstrap_ssh_username         = var.macos_bootstrap_ssh_username != "" ? var.macos_bootstrap_ssh_username : (local.use_ipsw ? var.macos_primary_account_name : local.system_admin_name)
+  macos_bootstrap_ssh_password         = var.macos_bootstrap_ssh_password != "" ? var.macos_bootstrap_ssh_password : local.system_admin_password
   effective_tart_home                  = var.tart_home != "" ? pathexpand(var.tart_home) : pathexpand("~/.tart")
   effective_auto_login_user            = trimspace(var.macos_auto_login_user) != "" ? trimspace(var.macos_auto_login_user) : var.macos_primary_account_name
   effective_user_data_disk_image_path         = var.user_data_disk_image_path != "" ? var.user_data_disk_image_path : "${local.effective_tart_home}/disks/${var.vm_name}/user-data.asif"
@@ -385,6 +411,7 @@ locals {
   run_nix_store_volume_stage            = local.profile_full || local.profile_nix_store_volume
   run_nix_install_stage                 = local.profile_full || local.profile_nix_install
   run_super_token_refresh_stage         = local.profile_super_token_refresh
+  run_secondary_admin_stage             = local.profile_full || local.profile_nxmatic || local.profile_super_token_refresh
 }
 
 variable "attach_data_disk_during_build" {
@@ -403,6 +430,12 @@ variable "enable_boot_command" {
   type        = bool
   default     = false
   description = "Whether to run automated macOS setup keystrokes (boot_command). Set to false for manual VNC-driven setup."
+}
+
+variable "enable_vnc_url_probe" {
+  type        = bool
+  default     = false
+  description = "Whether to run a harmless minimal VNC boot command (<wait1s>) so the plugin emits the VNC URL even when full boot automation is disabled."
 }
 
 variable "system_container_size_gb" {
@@ -453,7 +486,7 @@ source "tart-cli" "tart" {
   memory_gb    = 32
   display      = "1728x1080"
   headless     = !var.enable_build_console
-  disable_vnc  = true
+  disable_vnc  = false
   disk_size_gb = var.root_disk_size_gb
   disk_format  = var.root_disk_format
   ssh_password = local.macos_bootstrap_ssh_password
@@ -495,7 +528,7 @@ source "tart-cli" "tart" {
     # Data & Privacy
     "<wait10s><leftShiftOn><tab><leftShiftOff><spacebar>",
     # Create a Mac Account
-    "<wait10s><tab><tab><tab><tab><tab><tab>Managed via Tart<tab>nxmatic<tab>admin<tab>admin<tab><tab><spacebar><tab><tab><spacebar>",
+    "<wait10s><tab><tab><tab><tab><tab><tab>Managed via Tart<tab>${var.macos_primary_account_name}<tab>${local.system_admin_name}<tab>${local.system_admin_password}<tab><tab><spacebar><tab><tab><spacebar>",
     # Enable Voice Over
     "<wait75s><leftAltOn><f5><leftAltOff>",
     # Sign In with Your Apple ID (primary + fallback keyboard paths)
@@ -551,7 +584,7 @@ source "tart-cli" "tart" {
     # Keep Gatekeeper enabled. If a specific downloaded app is blocked,
     # clear its quarantine attribute instead of globally disabling assessments:
     #   sudo xattr -dr com.apple.quarantine /path/to/App.app
-  ] : []
+  ] : (var.enable_vnc_url_probe ? ["<wait1s>"] : [])
 
   // A (hopefully) temporary workaround for Virtualization.Framework's
   // installation process not fully finishing in a timely manner
@@ -574,7 +607,7 @@ build {
   provisioner "shell" {
     inline = [
       "set -euo pipefail",
-      "printf '%s\\n' 'admin' | sudo -S -p '' bash -c \"install -d -m 0750 /etc/sudoers.d && printf '%s\\n' '${local.macos_bootstrap_ssh_username} ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/99-packer-nopasswd && chmod 0440 /etc/sudoers.d/99-packer-nopasswd\"",
+      "printf '%s\\n' '${local.system_admin_password}' | sudo -S -p '' bash -c \"install -d -m 0750 /etc/sudoers.d && printf '%s\\n' '${local.macos_bootstrap_ssh_username} ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/99-packer-nopasswd && chmod 0440 /etc/sudoers.d/99-packer-nopasswd\"",
       "sudo -n -l >/dev/null",
     ]
   }
@@ -602,20 +635,24 @@ build {
       "PRIMARY_ACCOUNT_ALIAS='${var.macos_primary_account_alias}'",
       "PRIMARY_ACCOUNT_PASSWORD='${var.macos_primary_account_password}'",
       "PRIMARY_ACCOUNT_EXPECTED_UID='${var.macos_primary_account_expected_uid}'",
+      "SECONDARY_ADMIN_NAME='${var.macos_secondary_admin_name}'",
+      "SECONDARY_ADMIN_PASSWORD='${var.macos_secondary_admin_password}'",
+      "SYSTEM_ADMIN_NAME='${local.system_admin_name}'",
+      "SYSTEM_ADMIN_PASSWORD='${local.system_admin_password}'",
       "AUTO_LOGIN_USER='${local.effective_auto_login_user}'",
       "MACOS_DEBUG_MODE='${var.macos_debug_mode ? 1 : 0}'",
       "TART_GUEST_AGENT_USER='${local.effective_auto_login_user}'",
       "DARWIN_ENABLE_BOOT_ARGS='${var.macos_enable_darwin_boot_args ? 1 : 0}'",
       "DARWIN_BOOT_ARGS='${var.macos_darwin_boot_args}'",
       "DATA_HOME_USER='${var.macos_data_home_user}'",
-      "DATA_DISK_HOME_NAME='Data-Home-${var.macos_data_home_user}'",
-      "DATA_DISK_LIBRARY_CACHE_NAME='Data Library Cache ${var.macos_data_home_user}'",
-      "DATA_DISK_BUILD_CHAINS_CACHE_NAME='Data Build Chains Cache ${var.macos_data_home_user}'",
-      "DATA_DISK_VM_IMAGES_NAME='Data VM Images ${var.macos_data_home_user}'",
-      "DATA_HOME_VOLUME_PREFIX='Data'",
-      "BUILD_CHAINS_VOLUME_PREFIX='Data Build Chains Cache ${var.macos_data_home_user}'",
-      "VM_IMAGES_VOLUME_PREFIX='Data VM Images ${var.macos_data_home_user}'",
-      "LIB_CACHES_VOLUME_PREFIX='Data Library Cache ${var.macos_data_home_user}'",
+      "DATA_DISK_HOME_NAME='${var.macos_data_home_user} Users'",
+      "DATA_DISK_LIBRARY_CACHE_NAME='${var.macos_data_home_user} Library Cache'",
+      "DATA_DISK_BUILD_CHAINS_CACHE_NAME='${var.macos_data_home_user} Build Chains Cache'",
+      "DATA_DISK_VM_IMAGES_NAME='${var.macos_data_home_user} VM Images'",
+      "DATA_HOME_VOLUME_PREFIX='${var.macos_data_home_user}'",
+      "BUILD_CHAINS_VOLUME_PREFIX='${var.macos_data_home_user} Build Chains Cache'",
+      "VM_IMAGES_VOLUME_PREFIX='${var.macos_data_home_user} VM Images'",
+      "LIB_CACHES_VOLUME_PREFIX='${var.macos_data_home_user} Library Cache'",
       "LIB_APP_SUPPORT_VOLUME_PREFIX='Data-${var.macos_data_home_user}-Library-App-Support'",
       "DATA_DISK_NIX_STORE_NAME='${var.macos_nix_store_volume_label}'",
       "NIX_EXPECTED_VOLUME_LABEL='${var.macos_nix_store_volume_label}'",
@@ -629,11 +666,6 @@ build {
       "printf '%s\\n' \"$runtime_envrc\" > '${var.macos_env_pointer_file}'",
       "chmod 0600 '${var.macos_env_pointer_file}'",
     ]
-  }
-
-  provisioner "file" {
-    source      = "${path.root}/../data/tart-guest-agent.plist"
-    destination = "~/tart-guest-agent.plist"
   }
 
   provisioner "shell" {
@@ -716,8 +748,17 @@ build {
     inline = [
       "set -euo pipefail",
       "if [ '${var.attach_data_disk_during_build}' != 'true' ]; then echo 'Skipping ensure-secondary-admin-user.sh (attach_data_disk_during_build=false).'; exit 0; fi",
-      "if [ '${local.run_nxmatic_customization}' != 'true' ]; then echo 'Skipping ensure-secondary-admin-user.sh (provision_profile=${var.provision_profile}).'; exit 0; fi",
+      "if [ '${local.run_secondary_admin_stage}' != 'true' ]; then echo 'Skipping ensure-secondary-admin-user.sh (provision_profile=${var.provision_profile}).'; exit 0; fi",
       "env MACOS_ENV_FILE=\"$(cat '${var.macos_env_pointer_file}')\" bash -euxo pipefail '${var.macos_vm_scripts_dir}/ensure-secondary-admin-user.sh'",
+    ]
+  }
+
+  provisioner "shell" {
+    inline = [
+      "set -euo pipefail",
+      "if [ '${var.attach_data_disk_during_build}' != 'true' ]; then echo 'Skipping ensure-screen-sharing.sh (attach_data_disk_during_build=false).'; exit 0; fi",
+      "if [ '${local.run_secondary_admin_stage}' != 'true' ]; then echo 'Skipping ensure-screen-sharing.sh (provision_profile=${var.provision_profile}).'; exit 0; fi",
+      "env MACOS_ENV_FILE=\"$(cat '${var.macos_env_pointer_file}')\" bash -euxo pipefail '${var.macos_vm_scripts_dir}/ensure-screen-sharing.sh'",
     ]
   }
 
