@@ -1,0 +1,22 @@
+= Runtime Hotfix Control
+
+This folder tracks runtime hotfix assets that are promoted between bare-metal hosts.
+
+Policy:
+
+* Active stage assets are synced under `hotfix/runtime/<stage>/`.
+* `hotfix/runtime/ACTIVE_STAGE` records the selected stage.
+* Only active-stage payload is kept by `make hotfix-runtime-sync` (stale stage dirs are pruned).
+* Canonical reusable scripts live under `hotfix/runtime/scripts/`.
+
+Current canonical script:
+
+* `hotfix/runtime/scripts/fix-nikopol-case-sensitive-disks.sh`
+
+Typical workflow:
+
+* Generate launcher script from current Make knobs:
+** `make run-script`
+* Sync active-stage runtime payload:
+** `make hotfix-runtime-sync .hotfix.stage=<stage-name>`
+
