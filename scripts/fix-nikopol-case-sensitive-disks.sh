@@ -158,13 +158,22 @@ init_rsync_args() {
     has_e=1
     RSYNC_ARGS+=( -E )
   fi
-  if rsync_supports_short_opt '-X' || rsync_supports_long_opt '--xattrs' || rsync_supports_long_opt '--extended-attributes'; then
+  if rsync_supports_short_opt '-X'; then
     has_x=1
     RSYNC_ARGS+=( -X )
+  elif rsync_supports_long_opt '--xattrs'; then
+    has_x=1
+    RSYNC_ARGS+=( --xattrs )
+  elif rsync_supports_long_opt '--extended-attributes'; then
+    has_x=1
+    RSYNC_ARGS+=( --extended-attributes )
   fi
-  if rsync_supports_short_opt '-A' || rsync_supports_long_opt '--acls'; then
+  if rsync_supports_short_opt '-A'; then
     has_a=1
     RSYNC_ARGS+=( -A )
+  elif rsync_supports_long_opt '--acls'; then
+    has_a=1
+    RSYNC_ARGS+=( --acls )
   fi
 
   # Strict metadata policy for home-folder replication:
