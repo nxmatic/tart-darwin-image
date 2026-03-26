@@ -1,4 +1,4 @@
-SHELL := /bin/bash
+SHELL := bash
 .SHELLFLAGS := -euxo pipefail -c
 .ONESHELL:
 .SILENT:
@@ -58,7 +58,7 @@ endef
 define .tart.run
 $(call .env.load)
 if [[ "$(.dry-run.tart.effective)" == "1" ]]; then
-	echo "DRY-RUN[tart]: $(.tart.cmd) $(1)"
+	echo "DRY-RUN[tart]: TART_HOME=\"$${TART_HOME}\" TART_HOME_FOREIGN=\"$${TART_HOME_FOREIGN}\" $(.tart.cmd) $(1)"
 else
 	$(.tart.cmd) $(1)
 fi
@@ -205,6 +205,11 @@ endef
 .tart.run.extra-disks.renamed.from-vm ?= $(if $(strip $(TART_EXTRA_DISKS_RENAMED_FROM_VM)),$(TART_EXTRA_DISKS_RENAMED_FROM_VM),$(.tart.vm.name))
 .tart.run.extra-disk.opts ?= sync=none
 .tart.run.extra-args ?=
+.tart.run.script.path ?= $(.tart.home)/vms/$(.tart.vm.name).sh
+.tart.run.script.console ?= 1
+.hotfix.control.root ?= hotfix/runtime
+.hotfix.stage ?= $(.provision.profile)
+.hotfix.stage.effective := $(if $(strip $(.hotfix.stage)),$(strip $(.hotfix.stage)),unknown)
 .rm.skip-owned-disks-when-add-renamed ?= 1
 
 .tart.run.extra-disks.add-renamed.effective = $(if $(filter true 1 yes on,$(strip $(.tart.run.attach-foreign-renamed))),1,$(.tart.run.extra-disks.add-renamed))
@@ -479,6 +484,10 @@ $(if $(call opt-enabled,.tart.run.vnc),$(if $(call opt-enabled,.experimental),--
 $(if $(call opt-enabled,.tart.run.recovery),--recovery,)
 $(if $(strip $(.tart.run.net-bridged)),--net-bridged="$(.tart.run.net-bridged)",)
 $(if $(strip $(.tart.run.root-disk-opts)),--root-disk-opts="$(.tart.run.root-disk-opts)",)
+endef
+
+define .tart.run.script.args
+$(strip $(if $(call opt-enabled,.tart.run.script.console),$(.tart.run.console.args),) $(.tart.run.disk.args) $(.tart.run.extra.disk.args) $(.tart.run.extra-args))
 endef
 
 define .tart.disk.cmd.rename-volume
@@ -855,13 +864,13 @@ printf '%s\n' \
 	"  generated_at: \"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\"" > "$@"
 endef
 
-.PHONY: help validate validate-packer validate-tart clone-from-vanilla ensure-root-disk-size prepare-disks check-prefixed-role-disks build build-rootfs build-image build-system-only build-with-role-disks build-nix-store-volume build-nix-install build-nxmatic build-super-token-refresh stage-grow stage-nix-store-volume stage-nix-install stage-nxmatic stage-super-token-refresh stage1 stage2 stage3 stage4 stage5 cleanup-stages run console run-recovery-console info disks-info rename-disk-volume rename-disk-volumes rename-disk-attached-volumes rename-foreign-role-disk-volumes apfs-ownership-policy rm-runtime rm-runtime-one rm-role-disks rm-role-disks-one rm-owned-role-disks init-foreign-home rm refresh-console refresh promote shell-fmt shell-check fmt FORCE
+.PHONY: help validate validate-packer validate-tart clone-from-vanilla ensure-root-disk-size prepare-disks check-prefixed-role-disks build build-rootfs build-image build-system-only build-with-role-disks build-nix-store-volume build-nix-install build-nxmatic build-super-token-refresh stage-grow stage-nix-store-volume stage-nix-install stage-nxmatic stage-super-token-refresh stage1 stage2 stage3 stage4 stage5 cleanup-stages run console run-recovery-console run-script hotfix-runtime-sync info disks-info rename-disk-volume rename-disk-volumes rename-disk-attached-volumes rename-foreign-role-disk-volumes apfs-ownership-policy rm-runtime rm-runtime-one rm-role-disks rm-role-disks-one rm-owned-role-disks init-foreign-home rm refresh-console refresh promote shell-fmt shell-check fmt FORCE
 
 # Curated set of targets shown by `make help`
-.help.targets ?= help validate validate-packer validate-tart build stage1 stage2 stage3 stage4 stage5 cleanup-stages build-with-role-disks run console run-recovery-console info disks-info rename-disk-volumes rename-disk-attached-volumes rename-foreign-role-disk-volumes apfs-ownership-policy init-foreign-home refresh-console refresh promote rm rm-runtime rm-role-disks shell-fmt shell-check fmt
+.help.targets ?= help validate validate-packer validate-tart build stage1 stage2 stage3 stage4 stage5 cleanup-stages build-with-role-disks run console run-recovery-console run-script hotfix-runtime-sync info disks-info rename-disk-volumes rename-disk-attached-volumes rename-foreign-role-disk-volumes apfs-ownership-policy init-foreign-home refresh-console refresh promote rm rm-runtime rm-role-disks shell-fmt shell-check fmt
 
 # Curated set of command-line variables shown by `make help`
-.help.vars ?= .interactive .debug .experimental .skip .dry-run .dry-run.tart .dry-run.disk .dry-run.packer .dry-run.apfs.ownership .tart.vm.name .tart.vm.names .tart.rm.vm.name .tart.base.ref .tart.base.home .tart.base.link-source .tart.stage.name-prefix .tart.stage.use-dedicated-homes .tart.stage.tart-home-root .tart.stage.link-source-vm .tart.stage.cleanup.on-success .tart.stage.cleanup.keep-logs .tart.stage.cleanup.include-stage1 .tart.stage1.tart-home .tart.stage2.tart-home .tart.stage3.tart-home .tart.stage4.tart-home .tart.update.from-vm .tart.update.to-vm .tart.update.profile .tart.update.relax-session-tweaks .tart.update.tart-home .tart.update.link-role-disks .tart.update.link-source-vm .tart.update.source-vm-alias .provision.profile .attach-data-disk-during-build .tart.disk.recreate .tart.clone.force .tart.disk.source-vm .tart.disk.prefix.owner .tart.disk.prefix.enforce .tart.disk.rename.home .tart.run.recovery .tart.run.vnc .tart.run.net-bridged .tart.run.attach-foreign-renamed .tart.run.extra-disks .tart.run.extra-disks.from-vm .tart.run.extra-disks.allow-duplicate-roles .tart.run.extra-disk.opts .rm.skip-owned-disks-when-add-renamed .tart.disk.path .tart.disk.path.rename .tart.disk.name .tart.disk.volume-devs .apfs.ownership.mode .apfs.ownership.all-roles .apfs.ownership.include-system-mounts .apfs.ownership.images .macos.relax-session-tweaks .account.primary-name .account.secondary-name .auto-login.user TART_HOME TART_HOME_FOREIGN TART_ATTACH_FOREIGN_RENAMED
+.help.vars ?= .interactive .debug .experimental .skip .dry-run .dry-run.tart .dry-run.disk .dry-run.packer .dry-run.apfs.ownership .tart.vm.name .tart.vm.names .tart.rm.vm.name .tart.base.ref .tart.base.home .tart.base.link-source .tart.stage.name-prefix .tart.stage.use-dedicated-homes .tart.stage.tart-home-root .tart.stage.link-source-vm .tart.stage.cleanup.on-success .tart.stage.cleanup.keep-logs .tart.stage.cleanup.include-stage1 .tart.stage1.tart-home .tart.stage2.tart-home .tart.stage3.tart-home .tart.stage4.tart-home .tart.update.from-vm .tart.update.to-vm .tart.update.profile .tart.update.relax-session-tweaks .tart.update.tart-home .tart.update.link-role-disks .tart.update.link-source-vm .tart.update.source-vm-alias .provision.profile .attach-data-disk-during-build .tart.disk.recreate .tart.clone.force .tart.disk.source-vm .tart.disk.prefix.owner .tart.disk.prefix.enforce .tart.disk.rename.home .tart.run.recovery .tart.run.vnc .tart.run.net-bridged .tart.run.attach-foreign-renamed .tart.run.extra-disks .tart.run.extra-disks.from-vm .tart.run.extra-disks.allow-duplicate-roles .tart.run.extra-disk.opts .tart.run.script.path .tart.run.script.console .hotfix.control.root .hotfix.stage .rm.skip-owned-disks-when-add-renamed .tart.disk.path .tart.disk.path.rename .tart.disk.name .tart.disk.volume-devs .apfs.ownership.mode .apfs.ownership.all-roles .apfs.ownership.include-system-mounts .apfs.ownership.images .macos.relax-session-tweaks .account.primary-name .account.secondary-name .auto-login.user TART_HOME TART_HOME_FOREIGN TART_ATTACH_FOREIGN_RENAMED
 
 .help.vars += TART_EXTRA_DISKS_ADD_RENAMED TART_EXTRA_DISKS_RENAMED_FROM_VM
 .no-pager ?= 0
@@ -913,8 +922,14 @@ validate-packer: $(.env.file) ## Validate the Packer template
 	$(call .packer.run,validate $(strip $(.packer.vars.active)) $(.template))
 
 validate-tart: $(.env.file) ## Validate Tart CLI access
-	$(call .tart.run,--version) >/dev/null
-	$(call .tart.run,list) >/dev/null
+	$(call .env.load)
+	if [[ "$(.dry-run.tart.effective)" == "1" ]]; then
+		echo "DRY-RUN[tart]: TART_HOME=\"$${TART_HOME}\" TART_HOME_FOREIGN=\"$${TART_HOME_FOREIGN}\" $(.tart.cmd) --version"
+		echo "DRY-RUN[tart]: TART_HOME=\"$${TART_HOME}\" TART_HOME_FOREIGN=\"$${TART_HOME_FOREIGN}\" $(.tart.cmd) list"
+	else
+		$(.tart.cmd) --version >/dev/null
+		$(.tart.cmd) list >/dev/null
+	fi
 
 clone-from-vanilla: validate-tart $(.env.file) ## Clone Tahoe vanilla image into .tart.vm.name (set .tart.clone.force=1 to replace)
 	if [[ "$(.tart.clone.force)" == "1" ]]; then
@@ -1254,21 +1269,23 @@ check-prefixed-role-disks: ## Validate role-disk volume names match '<owner> - '
 		fi
 	done
 
-run: prepare-disks check-prefixed-role-disks ensure-root-disk-size $(.env.file) ## Run the built VM with all role disks attached
+run: prepare-disks $(if $(filter 1,$(.tart.disk.prefix.enforce)),check-prefixed-role-disks,) ensure-root-disk-size $(.env.file) ## Run the built VM with all role disks attached
+	declare -a extra_from_vm_args=()
 	$(.tart.run.extra.disk.args.from-vm.shell)
 	$(call .env.load)
 	if [[ "$(.dry-run.tart.effective)" == "1" ]]; then
-		printf 'DRY-RUN[tart]: %q ' $(.tart.cmd) run $(.tart.vm.name) $(strip $(.tart.run.disk.args) $(.tart.run.extra.disk.args) $(.tart.run.extra-args)) "$${extra_from_vm_args[@]}"
+		printf 'DRY-RUN[tart]: %q ' TART_HOME="$${TART_HOME}" TART_HOME_FOREIGN="$${TART_HOME_FOREIGN}" $(.tart.cmd) run $(.tart.vm.name) $(strip $(.tart.run.disk.args) $(.tart.run.extra.disk.args) $(.tart.run.extra-args)) "$${extra_from_vm_args[@]}"
 		echo
 	else
 		$(.tart.cmd) run $(.tart.vm.name) $(strip $(.tart.run.disk.args) $(.tart.run.extra.disk.args) $(.tart.run.extra-args)) "$${extra_from_vm_args[@]}"
 	fi
 
-console: prepare-disks check-prefixed-role-disks ensure-root-disk-size $(.env.file) ## Run VM with console troubleshooting defaults (Screen Sharing VNC + optional bridge/recovery)
+console: prepare-disks $(if $(filter 1,$(.tart.disk.prefix.enforce)),check-prefixed-role-disks,) ensure-root-disk-size $(.env.file) ## Run VM with console troubleshooting defaults (Screen Sharing VNC + optional bridge/recovery)
+	declare -a extra_from_vm_args=()
 	$(.tart.run.extra.disk.args.from-vm.shell)
 	$(call .env.load)
 	if [[ "$(.dry-run.tart.effective)" == "1" ]]; then
-		printf 'DRY-RUN[tart]: %q ' $(.tart.cmd) run $(.tart.vm.name) $(strip $(.tart.run.console.args) $(.tart.run.disk.args) $(.tart.run.extra.disk.args) $(.tart.run.extra-args)) "$${extra_from_vm_args[@]}"
+		printf 'DRY-RUN[tart]: %q ' TART_HOME="$${TART_HOME}" TART_HOME_FOREIGN="$${TART_HOME_FOREIGN}" $(.tart.cmd) run $(.tart.vm.name) $(strip $(.tart.run.console.args) $(.tart.run.disk.args) $(.tart.run.extra.disk.args) $(.tart.run.extra-args)) "$${extra_from_vm_args[@]}"
 		echo
 	else
 		$(.tart.cmd) run $(.tart.vm.name) $(strip $(.tart.run.console.args) $(.tart.run.disk.args) $(.tart.run.extra.disk.args) $(.tart.run.extra-args)) "$${extra_from_vm_args[@]}"
@@ -1276,6 +1293,62 @@ console: prepare-disks check-prefixed-role-disks ensure-root-disk-size $(.env.fi
 
 run-recovery-console: .tart.run.recovery=1
 run-recovery-console: console ## Run VM in recovery mode with console troubleshooting defaults
+
+run-script: prepare-disks $(if $(filter 1,$(.tart.disk.prefix.enforce)),check-prefixed-role-disks,) ensure-root-disk-size $(.env.file) ## Generate/update executable VM launcher script from current run settings
+	declare -a extra_from_vm_args=()
+	$(.tart.run.extra.disk.args.from-vm.shell)
+	$(call .env.load)
+	script_path="$(.tart.run.script.path)"
+	mkdir -p "$$(dirname "$$script_path")"
+	declare -a cmd_parts=(
+		env
+		"TART_HOME=$${TART_HOME}"
+		"TART_HOME_FOREIGN=$${TART_HOME_FOREIGN}"
+		"$(.tart.cmd)"
+		run
+		"$(.tart.vm.name)"
+		$(.tart.run.script.args)
+		"$${extra_from_vm_args[@]}"
+	)
+	{
+		printf '%s\n' '#!/usr/bin/env -S bash -euxo pipefail'
+		printf '\n'
+		printf 'exec'
+		for part in "$${cmd_parts[@]}"; do
+			[[ -z "$$part" ]] && continue
+			printf ' %q' "$$part"
+		done
+		printf '\n'
+	} > "$$script_path"
+	chmod 0755 "$$script_path" 2>/dev/null || true
+	: "Generated VM launcher script: $$script_path"
+
+hotfix-runtime-sync: run-script ## Sync active-stage runtime hotfix assets into versioned control folder (prunes stale stage dirs)
+	root_dir="$(.hotfix.control.root)"
+	stage="$(.hotfix.stage.effective)"
+	stage_dir="$$root_dir/$$stage"
+	script_path="$(.tart.run.script.path)"
+
+	mkdir -p "$$root_dir" "$$stage_dir"
+
+	for d in "$$root_dir"/*; do
+		[[ -d "$$d" ]] || continue
+		if [[ "$$d" != "$$stage_dir" ]]; then
+			rm -rf "$$d"
+		fi
+	done
+
+	cp -f "$$script_path" "$$stage_dir/$(.tart.vm.name).sh"
+
+	printf '%s\n' "$$stage" > "$$root_dir/ACTIVE_STAGE"
+	printf '%s\n' \
+		"vm=$(.tart.vm.name)" \
+		"stage=$$stage" \
+		"generated_at=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		"run_script=$$(basename "$$script_path")" \
+		> "$$stage_dir/hotfix-assets.env"
+
+	: "Synced active-stage hotfix assets to $$stage_dir"
 
 info: $(.env.file) ## Show Tart VM details
 	$(call .tart.run,list)
