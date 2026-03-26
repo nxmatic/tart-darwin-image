@@ -18,7 +18,7 @@ fi
 : "${PRIMARY_ACCOUNT_ALIAS:=nxmatic}"
 : "${PRIMARY_ACCOUNT_EXPECTED_UID:=0}"
 : "${AUTO_LOGIN_USER:=${PRIMARY_ACCOUNT_NAME}}"
-: "${PRIMARY_ACCOUNT_PASSWORD:=admin}"
+: "${PRIMARY_ACCOUNT_PASSWORD:=nxmatic}"
 : "${SECONDARY_ADMIN_NAME:=super}"
 : "${SECONDARY_ADMIN_PASSWORD:=super}"
 : "${PRIMARY_SECURE_TOKEN_REFRESH:=1}"
@@ -69,6 +69,8 @@ reconcile_primary_home_and_login() {
   sudo dscl . -create "${primary_record_path}" RealName "${PRIMARY_ACCOUNT_FULL_NAME}" || true
 
   sudo defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser "${AUTO_LOGIN_USER}"
+  sudo defaults write /Library/Preferences/com.apple.loginwindow SHOWFULLNAME -bool false || true
+  sudo defaults write /Library/Preferences/com.apple.loginwindow Hide500Users -bool false || true
   sudo sh -c "mkdir -p /etc/sudoers.d/; echo '${PRIMARY_ACCOUNT_NAME} ALL=(ALL) NOPASSWD: ALL' | EDITOR=tee visudo /etc/sudoers.d/${PRIMARY_ACCOUNT_NAME}-nopasswd"
 }
 

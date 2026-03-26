@@ -13,7 +13,7 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 : "${PRIMARY_ACCOUNT_NAME:=nxmatic}"
-: "${PRIMARY_ACCOUNT_PASSWORD:=admin}"
+: "${PRIMARY_ACCOUNT_PASSWORD:=nxmatic}"
 : "${SECONDARY_ADMIN_ENABLE:=1}"
 : "${SECONDARY_ADMIN_NAME:=super}"
 : "${SECONDARY_ADMIN_FULL_NAME:=System Recovery (super)}"

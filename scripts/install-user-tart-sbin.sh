@@ -43,6 +43,7 @@ install_helper() {
 
 install_helper "manage-cache-volumes.sh" "manage-cache-volumes"
 install_helper "relax-user-permissions.sh" "relax-user-permissions"
+install_helper "migrate-tart-home-to-opt.sh" "migrate-tart-home-to-opt"
 install_helper "run-provision-sequence.sh" "run-provision-sequence"
 install_helper "trim-vscode-vm-services.sh" "trim-vscode-vm-services"
 install_helper "install-tart-guest-agent.sh" "install-tart-guest-agent"

@@ -243,7 +243,7 @@ variable "macos_primary_account_alias" {
 
 variable "macos_primary_account_password" {
   type        = string
-  default     = "admin"
+  default     = "nxmatic"
   description = "Primary account password used for account/token maintenance during provisioning."
 }
 

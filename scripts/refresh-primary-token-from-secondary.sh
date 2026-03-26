@@ -13,7 +13,7 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 : "${PRIMARY_ACCOUNT_NAME:=nxmatic}"
-: "${PRIMARY_ACCOUNT_PASSWORD:=admin}"
+: "${PRIMARY_ACCOUNT_PASSWORD:=nxmatic}"
 : "${SECONDARY_ADMIN_NAME:=super}"
 : "${SECONDARY_ADMIN_PASSWORD:=super}"
 : "${MACOS_DEBUG_MODE:=1}"
@@ -48,6 +48,8 @@ apply_final_auto_login_policy() {
   fi
 
   sudo defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser "${target_auto_login}"
+  sudo defaults write /Library/Preferences/com.apple.loginwindow SHOWFULLNAME -bool false || true
+  sudo defaults write /Library/Preferences/com.apple.loginwindow Hide500Users -bool false || true
   echo "Final autoLoginUser policy applied: ${target_auto_login} (MACOS_DEBUG_MODE=${MACOS_DEBUG_MODE})"
 }
 

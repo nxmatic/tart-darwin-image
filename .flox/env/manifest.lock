@@ -110,6 +110,9 @@
         ]
       }
     },
+    "vars": {
+      "TART_HOME": "${FLOX_ENV_PROJECT}/.tart"
+    },
     "hook": {},
     "profile": {
       "common": "    GITHUB_SIGNING_KEYFILE=\"$HOME\"/.ssh/keys.d/github-signing\n    if [[ -r \"$GITHUB_SIGNING_KEYFILE\" ]]; then\n      set -a\n      SOPS_AGE_KEY=$( ssh-to-age -private-key < \"$GITHUB_SIGNING_KEYFILE\" )\n      set +a\n    else\n      echo no signing key\n    fi\n  \n    export ANTORA_CACHE_DIR=\"${FLOX_ENV_PROJECT}/.cache/antora\"\n    export DOCS_BUILD_DIR=\"${FLOX_ENV_PROJECT}/.output/docs\"\n  "
@@ -2807,6 +2810,9 @@
             "aarch64-darwin"
           ]
         }
+      },
+      "vars": {
+        "TART_HOME": "${FLOX_ENV_PROJECT}/.tart"
       },
       "hook": {},
       "profile": {},

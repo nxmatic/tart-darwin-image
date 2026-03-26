@@ -57,6 +57,7 @@ STEPS=(
   resize-system-container.sh
   rename-primary-user-if-vanilla.sh
   ensure-secondary-admin-user.sh
+  unlock-primary-account.sh
   install-user-tart-sbin.sh
 )
 
