@@ -27,13 +27,23 @@ variable "user_library_disk_max_size_gb" {
   }
 }
 
-variable "git_store_disk_max_size_gb" {
+variable "git_bare_store_disk_max_size_gb" {
   type        = number
-  default     = 100
-  description = "Maximum logical size (GB) for Git Store disk image."
+  default     = 8
+  description = "Maximum logical size (GB) for Git Bare Store disk image."
   validation {
-    condition     = var.git_store_disk_max_size_gb >= 1
-    error_message = "Git Store disk max size must be greater than or equal to 1 GB."
+    condition     = var.git_bare_store_disk_max_size_gb >= 1
+    error_message = "Git Bare Store disk max size must be greater than or equal to 1 GB."
+  }
+}
+
+variable "git_worktree_store_disk_max_size_gb" {
+  type        = number
+  default     = 9
+  description = "Maximum logical size (GB) for Git Worktree Store disk image."
+  validation {
+    condition     = var.git_worktree_store_disk_max_size_gb >= 1
+    error_message = "Git Worktree Store disk max size must be greater than or equal to 1 GB."
   }
 }
 
@@ -87,13 +97,23 @@ variable "user_library_disk_initial_size_gb" {
   }
 }
 
-variable "git_store_disk_initial_size_gb" {
+variable "git_bare_store_disk_initial_size_gb" {
   type        = number
-  default     = 12
-  description = "Initial APFS volume size (GB) to use inside the Git Store disk. Set to 0 to use maximum available size immediately."
+  default     = 4
+  description = "Initial APFS volume size (GB) to use inside the Git Bare Store disk. Set to 0 to use maximum available size immediately."
   validation {
-    condition     = var.git_store_disk_initial_size_gb >= 0
-    error_message = "Git Store disk initial size must be greater than or equal to 0 GB (0 means max available size)."
+    condition     = var.git_bare_store_disk_initial_size_gb >= 0
+    error_message = "Git Bare Store disk initial size must be greater than or equal to 0 GB (0 means max available size)."
+  }
+}
+
+variable "git_worktree_store_disk_initial_size_gb" {
+  type        = number
+  default     = 6
+  description = "Initial APFS volume size (GB) to use inside the Git Worktree Store disk. Set to 0 to use maximum available size immediately."
+  validation {
+    condition     = var.git_worktree_store_disk_initial_size_gb >= 0
+    error_message = "Git Worktree Store disk initial size must be greater than or equal to 0 GB (0 means max available size)."
   }
 }
 
@@ -139,10 +159,16 @@ variable "user_library_disk_image_path" {
   description = "Optional override for User Library disk image path. If empty, defaults to ~/.tart/disks/<vm_name>/user-library.asif."
 }
 
-variable "git_store_disk_image_path" {
+variable "git_bare_store_disk_image_path" {
   type        = string
   default     = ""
-  description = "Optional override for Git Store disk image path. If empty, defaults to ~/.tart/disks/<vm_name>/git-store.asif."
+  description = "Optional override for Git Bare Store disk image path. If empty, defaults to ~/.tart/disks/<vm_name>/git-bare-store.asif."
+}
+
+variable "git_worktree_store_disk_image_path" {
+  type        = string
+  default     = ""
+  description = "Optional override for Git Worktree Store disk image path. If empty, defaults to ~/.tart/disks/<vm_name>/git-worktree-store.asif."
 }
 
 variable "nix_store_disk_image_path" {
@@ -263,7 +289,8 @@ locals {
   effective_tart_home                  = var.tart_home != "" ? pathexpand(var.tart_home) : pathexpand("~/.tart")
   effective_data_disk_image_path         = var.data_disk_image_path != "" ? var.data_disk_image_path : "${local.effective_tart_home}/disks/${var.vm_name}/user-data.asif"
   effective_user_library_disk_image_path = var.user_library_disk_image_path != "" ? var.user_library_disk_image_path : "${local.effective_tart_home}/disks/${var.vm_name}/user-library.asif"
-  effective_git_store_disk_image_path    = var.git_store_disk_image_path != "" ? var.git_store_disk_image_path : "${local.effective_tart_home}/disks/${var.vm_name}/git-store.asif"
+  effective_git_bare_store_disk_image_path     = var.git_bare_store_disk_image_path != "" ? var.git_bare_store_disk_image_path : "${local.effective_tart_home}/disks/${var.vm_name}/git-bare-store.asif"
+  effective_git_worktree_store_disk_image_path = var.git_worktree_store_disk_image_path != "" ? var.git_worktree_store_disk_image_path : "${local.effective_tart_home}/disks/${var.vm_name}/git-worktree-store.asif"
   effective_nix_store_disk_image_path    = var.nix_store_disk_image_path != "" ? var.nix_store_disk_image_path : "${local.effective_tart_home}/disks/${var.vm_name}/nix-store.asif"
   effective_build_chains_disk_image_path = var.build_chains_disk_image_path != "" ? var.build_chains_disk_image_path : "${local.effective_tart_home}/disks/${var.vm_name}/build-chains.asif"
   effective_vm_images_disk_image_path    = var.vm_images_disk_image_path != "" ? var.vm_images_disk_image_path : "${local.effective_tart_home}/disks/${var.vm_name}/vm-images.asif"
@@ -339,7 +366,8 @@ source "tart-cli" "tart" {
   run_extra_args = var.attach_data_disk_during_build ? [
     "--disk=${abspath(local.effective_data_disk_image_path)}:sync=none",
     "--disk=${abspath(local.effective_user_library_disk_image_path)}:sync=none",
-    "--disk=${abspath(local.effective_git_store_disk_image_path)}:sync=none",
+    "--disk=${abspath(local.effective_git_bare_store_disk_image_path)}:sync=none",
+    "--disk=${abspath(local.effective_git_worktree_store_disk_image_path)}:sync=none",
     "--disk=${abspath(local.effective_nix_store_disk_image_path)}:sync=none",
     "--disk=${abspath(local.effective_build_chains_disk_image_path)}:sync=none",
     "--disk=${abspath(local.effective_vm_images_disk_image_path)}:sync=none",
@@ -484,6 +512,7 @@ build {
       "sudo install -m 0755 '${var.macos_vm_scripts_dir}/relax-user-permissions.sh' /usr/local/sbin/relax-user-permissions",
       "sudo install -m 0755 '${var.macos_vm_scripts_dir}/manage-cache-volumes.sh' /usr/local/sbin/manage-cache-volumes",
       "sudo install -m 0755 '${var.macos_vm_scripts_dir}/run-provision-sequence.sh' /usr/local/sbin/run-provision-sequence",
+      "sudo install -m 0755 '${var.macos_vm_scripts_dir}/setup-git-store-layout.sh' /usr/local/sbin/setup-git-store-layout",
       "sudo install -m 0755 '${var.macos_vm_scripts_dir}/trim-vscode-vm-services.sh' /usr/local/sbin/trim-vscode-vm-services",
       "sudo install -m 0755 '${var.macos_vm_scripts_dir}/install-user-tart-sbin.sh' /usr/local/sbin/install-user-tart-sbin",
     ]
@@ -514,6 +543,13 @@ build {
     inline = [
       "set -euo pipefail",
       "env MACOS_ENV_FILE=\"$(cat '${var.macos_env_pointer_file}')\" bash -euxo pipefail '${var.macos_vm_scripts_dir}/setup-data-disk.sh'",
+    ]
+  }
+
+  provisioner "shell" {
+    inline = [
+      "set -euo pipefail",
+      "env MACOS_ENV_FILE=\"$(cat '${var.macos_env_pointer_file}')\" bash -euxo pipefail '${var.macos_vm_scripts_dir}/setup-git-store-layout.sh'",
     ]
   }
 
@@ -559,30 +595,34 @@ build {
       // and let Tart initialize/manage missing images.
       "if [ ${var.user_data_disk_initial_size_gb} -gt ${var.data_disk_max_size_gb} ]; then echo 'user_data_disk_initial_size_gb cannot be greater than data_disk_max_size_gb'; exit 1; fi",
       "if [ ${var.user_library_disk_initial_size_gb} -gt ${var.user_library_disk_max_size_gb} ]; then echo 'user_library_disk_initial_size_gb cannot be greater than user_library_disk_max_size_gb'; exit 1; fi",
-      "if [ ${var.git_store_disk_initial_size_gb} -gt ${var.git_store_disk_max_size_gb} ]; then echo 'git_store_disk_initial_size_gb cannot be greater than git_store_disk_max_size_gb'; exit 1; fi",
+      "if [ ${var.git_bare_store_disk_initial_size_gb} -gt ${var.git_bare_store_disk_max_size_gb} ]; then echo 'git_bare_store_disk_initial_size_gb cannot be greater than git_bare_store_disk_max_size_gb'; exit 1; fi",
+      "if [ ${var.git_worktree_store_disk_initial_size_gb} -gt ${var.git_worktree_store_disk_max_size_gb} ]; then echo 'git_worktree_store_disk_initial_size_gb cannot be greater than git_worktree_store_disk_max_size_gb'; exit 1; fi",
       "if [ ${var.nix_store_disk_initial_size_gb} -gt ${var.nix_store_disk_max_size_gb} ]; then echo 'nix_store_disk_initial_size_gb cannot be greater than nix_store_disk_max_size_gb'; exit 1; fi",
       "if [ ${var.build_chains_disk_initial_size_gb} -gt ${var.build_chains_disk_max_size_gb} ]; then echo 'build_chains_disk_initial_size_gb cannot be greater than build_chains_disk_max_size_gb'; exit 1; fi",
       "if [ ${var.vm_images_disk_initial_size_gb} -gt ${var.vm_images_disk_max_size_gb} ]; then echo 'vm_images_disk_initial_size_gb cannot be greater than vm_images_disk_max_size_gb'; exit 1; fi",
       "mkdir -p \"$(dirname '${local.effective_data_disk_image_path}')\"",
       "mkdir -p \"$(dirname '${local.effective_user_library_disk_image_path}')\"",
-      "mkdir -p \"$(dirname '${local.effective_git_store_disk_image_path}')\"",
+      "mkdir -p \"$(dirname '${local.effective_git_bare_store_disk_image_path}')\"",
+      "mkdir -p \"$(dirname '${local.effective_git_worktree_store_disk_image_path}')\"",
       "mkdir -p \"$(dirname '${local.effective_nix_store_disk_image_path}')\"",
       "mkdir -p \"$(dirname '${local.effective_build_chains_disk_image_path}')\"",
       "mkdir -p \"$(dirname '${local.effective_vm_images_disk_image_path}')\"",
       "if [ -f \"${local.effective_data_disk_image_path}\" ]; then echo \"Reusing existing User Data disk image: ${local.effective_data_disk_image_path}\"; else diskutil image create blank --format ASIF --size ${var.data_disk_max_size_gb}G --volumeName 'User Data' \"${local.effective_data_disk_image_path}\"; fi",
       "if [ -f \"${local.effective_user_library_disk_image_path}\" ]; then echo \"Reusing existing User Library disk image: ${local.effective_user_library_disk_image_path}\"; else diskutil image create blank --format ASIF --size ${var.user_library_disk_max_size_gb}G --volumeName 'User Library' \"${local.effective_user_library_disk_image_path}\"; fi",
-      "if [ -f \"${local.effective_git_store_disk_image_path}\" ]; then echo \"Reusing existing Git Store disk image: ${local.effective_git_store_disk_image_path}\"; else diskutil image create blank --format ASIF --size ${var.git_store_disk_max_size_gb}G --volumeName 'Git Store' \"${local.effective_git_store_disk_image_path}\"; fi",
+      "if [ -f \"${local.effective_git_bare_store_disk_image_path}\" ]; then echo \"Reusing existing Git Bare Store disk image: ${local.effective_git_bare_store_disk_image_path}\"; else diskutil image create blank --format ASIF --size ${var.git_bare_store_disk_max_size_gb}G --volumeName 'Git Bare Store' \"${local.effective_git_bare_store_disk_image_path}\"; fi",
+      "if [ -f \"${local.effective_git_worktree_store_disk_image_path}\" ]; then echo \"Reusing existing Git Worktree Store disk image: ${local.effective_git_worktree_store_disk_image_path}\"; else diskutil image create blank --format ASIF --size ${var.git_worktree_store_disk_max_size_gb}G --volumeName 'Git Worktree Store' \"${local.effective_git_worktree_store_disk_image_path}\"; fi",
       "if [ -f \"${local.effective_nix_store_disk_image_path}\" ]; then echo \"Reusing existing Nix Store disk image: ${local.effective_nix_store_disk_image_path}\"; else diskutil image create blank --format ASIF --size ${var.nix_store_disk_max_size_gb}G --volumeName 'Nix Store' \"${local.effective_nix_store_disk_image_path}\"; fi",
       "if [ -f \"${local.effective_build_chains_disk_image_path}\" ]; then echo \"Reusing existing Build Chains disk image: ${local.effective_build_chains_disk_image_path}\"; else diskutil image create blank --format ASIF --size ${var.build_chains_disk_max_size_gb}G --volumeName 'Build Chains' \"${local.effective_build_chains_disk_image_path}\"; fi",
       "if [ -f \"${local.effective_vm_images_disk_image_path}\" ]; then echo \"Reusing existing VM Images disk image: ${local.effective_vm_images_disk_image_path}\"; else diskutil image create blank --format ASIF --size ${var.vm_images_disk_max_size_gb}G --volumeName 'VM Images' \"${local.effective_vm_images_disk_image_path}\"; fi",
       "echo \"User Data disk max/initial: ${var.data_disk_max_size_gb}G/${var.user_data_disk_initial_size_gb}G\"",
       "echo \"User Library disk max/initial: ${var.user_library_disk_max_size_gb}G/${var.user_library_disk_initial_size_gb}G\"",
-      "echo \"Git Store disk max/initial: ${var.git_store_disk_max_size_gb}G/${var.git_store_disk_initial_size_gb}G\"",
+      "echo \"Git Bare Store disk max/initial: ${var.git_bare_store_disk_max_size_gb}G/${var.git_bare_store_disk_initial_size_gb}G\"",
+      "echo \"Git Worktree Store disk max/initial: ${var.git_worktree_store_disk_max_size_gb}G/${var.git_worktree_store_disk_initial_size_gb}G\"",
       "echo \"Nix Store disk max/initial: ${var.nix_store_disk_max_size_gb}G/${var.nix_store_disk_initial_size_gb}G\"",
       "echo \"Build Chains disk max/initial: ${var.build_chains_disk_max_size_gb}G/${var.build_chains_disk_initial_size_gb}G\"",
       "echo \"VM Images disk max/initial: ${var.vm_images_disk_max_size_gb}G/${var.vm_images_disk_initial_size_gb}G\"",
       "echo \"Attach at runtime:\"",
-      "echo \"  tart run ${var.vm_name} --disk='${local.effective_data_disk_image_path}:sync=none' --disk='${local.effective_user_library_disk_image_path}:sync=none' --disk='${local.effective_git_store_disk_image_path}:sync=none' --disk='${local.effective_nix_store_disk_image_path}:sync=none' --disk='${local.effective_build_chains_disk_image_path}:sync=none' --disk='${local.effective_vm_images_disk_image_path}:sync=none'\"",
+      "echo \"  tart run ${var.vm_name} --disk='${local.effective_data_disk_image_path}:sync=none' --disk='${local.effective_user_library_disk_image_path}:sync=none' --disk='${local.effective_git_bare_store_disk_image_path}:sync=none' --disk='${local.effective_git_worktree_store_disk_image_path}:sync=none' --disk='${local.effective_nix_store_disk_image_path}:sync=none' --disk='${local.effective_build_chains_disk_image_path}:sync=none' --disk='${local.effective_vm_images_disk_image_path}:sync=none'\"",
     ]
   }
 }

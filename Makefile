@@ -39,9 +39,22 @@ endef
 # -----------------------------------------------------------------------------
 # disk command snippets (shared shell fragments)
 # -----------------------------------------------------------------------------
-.tart.disk.cmd.ensure-parent = mkdir -p "$(dir $1)"
-.tart.disk.cmd.prepare-image = if [[ -f "$2" ]]; then : "Reusing existing $1 disk: $2"; else diskutil image create blank --format ASIF --size $3G --volumeName "$1" "$2"; fi
-.tart.disk.cmd.show-info = : "$1: $2"; ls -lh "$2" 2>/dev/null || true
+define .tart.disk.cmd.ensure-parent
+mkdir -p "$(dir $1)"
+endef
+
+define .tart.disk.cmd.prepare-image
+if [[ -f "$2" ]]; then
+	: "Reusing existing $1 disk: $2"
+else
+	diskutil image create blank --format ASIF --size $3G --volumeName "$1" "$2"
+fi
+endef
+
+define .tart.disk.cmd.show-info
+: "$1: $2"
+ls -lh "$2" 2>/dev/null || true
+endef
 
 # -----------------------------------------------------------------------------
 # build/identity domain
@@ -64,6 +77,13 @@ endef
 .account.bootstrap-ssh-name ?= $(.account.primary-name)
 .data.home-user ?= $(.account.primary-name)
 
+# Git store logical layout defaults
+.git.store.layout.mode ?= split
+.git.store.bare.root ?= /private/var/lib/git/bare
+.git.store.worktree.root ?= /private/var/lib/git/worktrees
+.git.store.migrate.existing ?= 1
+.git.store.primary-owner ?= $(.data.home-user)
+
 # -----------------------------------------------------------------------------
 # disk model domain (role list, defaults, computed paths)
 # -----------------------------------------------------------------------------
@@ -72,7 +92,8 @@ endef
 .tart.disk.root.max-size-gb ?= 100
 .tart.disk.user-data.max-size-gb ?= 160
 .tart.disk.user-library.max-size-gb ?= 40
-.tart.disk.git-store.max-size-gb ?= 24
+.tart.disk.git-bare-store.max-size-gb ?= 8
+.tart.disk.git-worktree-store.max-size-gb ?= 9
 .tart.disk.nix-store.max-size-gb ?= 180
 .tart.disk.build-chains.max-size-gb ?= 64
 .tart.disk.vm-images.max-size-gb ?= 512
@@ -80,18 +101,20 @@ endef
 # Tart initial in-VM APFS sizes (GB)
 .tart.disk.user-data.initial-size-gb ?= 64
 .tart.disk.user-library.initial-size-gb ?= 20
-.tart.disk.git-store.initial-size-gb ?= 12
+.tart.disk.git-bare-store.initial-size-gb ?= 4
+.tart.disk.git-worktree-store.initial-size-gb ?= 6
 .tart.disk.nix-store.initial-size-gb ?= 90
 .tart.disk.build-chains.initial-size-gb ?= 16
 .tart.disk.vm-images.initial-size-gb ?= 120
 
-.tart.disk.roles := user-data user-library git-store nix-store build-chains vm-images
+.tart.disk.roles := user-data user-library git-bare-store git-worktree-store nix-store build-chains vm-images
 .tart.disks.dir ?= $(abspath $(.tart.home)/disks/$(.tart.vm-name))
 
 # Computed default disk paths (align with template defaults)
 .tart.disk.user-data.image-path ?=
 .tart.disk.user-library.image-path ?=
-.tart.disk.git-store.image-path ?=
+.tart.disk.git-bare-store.image-path ?=
+.tart.disk.git-worktree-store.image-path ?=
 .tart.disk.nix-store.image-path ?=
 .tart.disk.build-chains.image-path ?=
 .tart.disk.vm-images.image-path ?=
@@ -130,7 +153,8 @@ endef
 define .tart.run.disk.args.from-data-disks
 $(call .tart.disk.run-arg.from-data-disks,user-data) \
 $(call .tart.disk.run-arg.from-data-disks,user-library) \
-$(call .tart.disk.run-arg.from-data-disks,git-store) \
+$(call .tart.disk.run-arg.from-data-disks,git-bare-store) \
+$(call .tart.disk.run-arg.from-data-disks,git-worktree-store) \
 $(call .tart.disk.run-arg.from-data-disks,nix-store) \
 $(call .tart.disk.run-arg.from-data-disks,build-chains) \
 $(call .tart.disk.run-arg.from-data-disks,vm-images)
@@ -143,7 +167,8 @@ endef
 define .tart.run.disk.args.from-tart-disks
 $(call .tart.disk.run-arg.from-tart-disks,user-data) \
 $(call .tart.disk.run-arg.from-tart-disks,user-library) \
-$(call .tart.disk.run-arg.from-tart-disks,git-store) \
+$(call .tart.disk.run-arg.from-tart-disks,git-bare-store) \
+$(call .tart.disk.run-arg.from-tart-disks,git-worktree-store) \
 $(call .tart.disk.run-arg.from-tart-disks,nix-store) \
 $(call .tart.disk.run-arg.from-tart-disks,build-chains) \
 $(call .tart.disk.run-arg.from-tart-disks,vm-images)
@@ -281,13 +306,19 @@ define .env.disks
 
 USER_DATA_DISK_INITIAL_SIZE_GB=$(.tart.disk.user-data.initial-size-gb)
 USER_LIBRARY_DISK_INITIAL_SIZE_GB=$(.tart.disk.user-library.initial-size-gb)
-GIT_STORE_DISK_INITIAL_SIZE_GB=$(.tart.disk.git-store.initial-size-gb)
+GIT_BARE_STORE_DISK_INITIAL_SIZE_GB=$(.tart.disk.git-bare-store.initial-size-gb)
+GIT_WORKTREE_STORE_DISK_INITIAL_SIZE_GB=$(.tart.disk.git-worktree-store.initial-size-gb)
+# Backward-compat alias: old single Git Store initial size maps to worktree store.
+GIT_STORE_DISK_INITIAL_SIZE_GB=$(.tart.disk.git-worktree-store.initial-size-gb)
 NIX_STORE_DISK_INITIAL_SIZE_GB=$(.tart.disk.nix-store.initial-size-gb)
 BUILD_CHAINS_DISK_INITIAL_SIZE_GB=$(.tart.disk.build-chains.initial-size-gb)
 VM_IMAGES_DISK_INITIAL_SIZE_GB=$(.tart.disk.vm-images.initial-size-gb)
 DATA_DISK_USER_DATA_NAME="User Data"
 DATA_DISK_USER_LIBRARY_NAME="User Library"
-DATA_DISK_GIT_STORE_NAME="Git Store"
+DATA_DISK_GIT_BARE_STORE_NAME="Git Bare Store"
+DATA_DISK_GIT_WORKTREE_STORE_NAME="Git Worktree Store"
+# Backward-compat alias: old logical Git Store label now means worktree store.
+DATA_DISK_GIT_STORE_NAME="Git Worktree Store"
 DATA_DISK_NIX_STORE_NAME="Nix Store"
 DATA_DISK_BUILD_CHAINS_NAME="Build Cache"
 DATA_DISK_VM_IMAGES_NAME="VM Images"
@@ -326,8 +357,18 @@ LIB_APP_SUPPORT_BASE_REL_PATH="Library/Application Support"
 LIB_APP_SUPPORT_SUBVOLUME_SPECS="jetbrains:JetBrains|code_insiders:Code - Insiders|code:Code|comet:Comet"
 LIB_APP_SUPPORT_SUBVOLUME_FSTAB=1
 LIB_APP_SUPPORT_SUBVOLUME_MOUNT_OPTS=rw,nobrowse
+GIT_BARE_STORE_CONFIGURE_SYSTEM_MOUNT=1
+GIT_BARE_STORE_SYSTEM_MOUNT_POINT=$(.git.store.bare.root)
+GIT_WORKTREE_STORE_CONFIGURE_SYSTEM_MOUNT=1
+GIT_WORKTREE_STORE_SYSTEM_MOUNT_POINT=$(.git.store.worktree.root)
+# Backward-compat aliases retained for scripts still consulting legacy names.
 GIT_STORE_CONFIGURE_SYSTEM_MOUNT=1
-GIT_STORE_SYSTEM_MOUNT_POINT=/private/var/lib/git
+GIT_STORE_SYSTEM_MOUNT_POINT=$(.git.store.worktree.root)
+GIT_STORE_LAYOUT_MODE=$(.git.store.layout.mode)
+GIT_STORE_BARE_ROOT=$(.git.store.bare.root)
+GIT_STORE_WORKTREE_ROOT=$(.git.store.worktree.root)
+GIT_STORE_MIGRATE_EXISTING=$(.git.store.migrate.existing)
+GIT_STORE_PRIMARY_OWNER=$(.git.store.primary-owner)
 NIX_STORE_CONFIGURE_SYSTEM_MOUNT=1
 NIX_STORE_SYSTEM_MOUNT_POINT=/nix
 NIX_STORE_CONFIGURE_SYNTHETIC=1
@@ -415,13 +456,15 @@ prepare-disks: ## Create role disk images when enabled and missing
 ifneq ($(call opt-enabled,.attach-data-disk-during-build),)
 	$(call .tart.disk.cmd.ensure-parent,$(.tart.disk.user-data.image-path.effective))
 	$(call .tart.disk.cmd.ensure-parent,$(.tart.disk.user-library.image-path.effective))
-	$(call .tart.disk.cmd.ensure-parent,$(.tart.disk.git-store.image-path.effective))
+	$(call .tart.disk.cmd.ensure-parent,$(.tart.disk.git-bare-store.image-path.effective))
+	$(call .tart.disk.cmd.ensure-parent,$(.tart.disk.git-worktree-store.image-path.effective))
 	$(call .tart.disk.cmd.ensure-parent,$(.tart.disk.nix-store.image-path.effective))
 	$(call .tart.disk.cmd.ensure-parent,$(.tart.disk.build-chains.image-path.effective))
 	$(call .tart.disk.cmd.ensure-parent,$(.tart.disk.vm-images.image-path.effective))
 	$(call .tart.disk.cmd.prepare-image,User Data,$(.tart.disk.user-data.image-path.effective),$(.tart.disk.user-data.max-size-gb))
 	$(call .tart.disk.cmd.prepare-image,User Library,$(.tart.disk.user-library.image-path.effective),$(.tart.disk.user-library.max-size-gb))
-	$(call .tart.disk.cmd.prepare-image,Git Store,$(.tart.disk.git-store.image-path.effective),$(.tart.disk.git-store.max-size-gb))
+	$(call .tart.disk.cmd.prepare-image,Git Bare Store,$(.tart.disk.git-bare-store.image-path.effective),$(.tart.disk.git-bare-store.max-size-gb))
+	$(call .tart.disk.cmd.prepare-image,Git Worktree Store,$(.tart.disk.git-worktree-store.image-path.effective),$(.tart.disk.git-worktree-store.max-size-gb))
 	$(call .tart.disk.cmd.prepare-image,Nix Store,$(.tart.disk.nix-store.image-path.effective),$(.tart.disk.nix-store.max-size-gb))
 	$(call .tart.disk.cmd.prepare-image,Build Cache,$(.tart.disk.build-chains.image-path.effective),$(.tart.disk.build-chains.max-size-gb))
 	$(call .tart.disk.cmd.prepare-image,VM Images,$(.tart.disk.vm-images.image-path.effective),$(.tart.disk.vm-images.max-size-gb))
@@ -455,7 +498,8 @@ network-bridge-interface: ## Print resolved Tart bridged network service name
 disks-info: ## Show role disk files and sizes
 	$(call .tart.disk.cmd.show-info,User Data,$(.tart.disk.user-data.image-path.effective))
 	$(call .tart.disk.cmd.show-info,User Library,$(.tart.disk.user-library.image-path.effective))
-	$(call .tart.disk.cmd.show-info,Git Store,$(.tart.disk.git-store.image-path.effective))
+	$(call .tart.disk.cmd.show-info,Git Bare Store,$(.tart.disk.git-bare-store.image-path.effective))
+	$(call .tart.disk.cmd.show-info,Git Worktree Store,$(.tart.disk.git-worktree-store.image-path.effective))
 	$(call .tart.disk.cmd.show-info,Nix Store,$(.tart.disk.nix-store.image-path.effective))
 	$(call .tart.disk.cmd.show-info,Build Cache,$(.tart.disk.build-chains.image-path.effective))
 	$(call .tart.disk.cmd.show-info,VM Images,$(.tart.disk.vm-images.image-path.effective))
@@ -465,7 +509,7 @@ clean-disks: ## Remove role disk images (requires CONFIRM=1)
 		: "Refusing to delete disk images. Re-run with: make clean-disks CONFIRM=1"
 		exit 1
 	fi
-	rm -f $(.tart.disk.user-data.image-path.effective) $(.tart.disk.user-library.image-path.effective) $(.tart.disk.git-store.image-path.effective) $(.tart.disk.nix-store.image-path.effective) $(.tart.disk.build-chains.image-path.effective) $(.tart.disk.vm-images.image-path.effective)
+	rm -f $(.tart.disk.user-data.image-path.effective) $(.tart.disk.user-library.image-path.effective) $(.tart.disk.git-bare-store.image-path.effective) $(.tart.disk.git-worktree-store.image-path.effective) $(.tart.disk.nix-store.image-path.effective) $(.tart.disk.build-chains.image-path.effective) $(.tart.disk.vm-images.image-path.effective)
 	: "Removed role disk images for $(.tart.vm-name)."
 
 shell-fmt: ## Format shell scripts if shfmt is available

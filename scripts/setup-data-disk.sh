@@ -14,14 +14,16 @@ fi
 
 : "${USER_DATA_DISK_INITIAL_SIZE_GB:=64}"
 : "${USER_LIBRARY_DISK_INITIAL_SIZE_GB:=20}"
-: "${GIT_STORE_DISK_INITIAL_SIZE_GB:=12}"
+: "${GIT_WORKTREE_STORE_DISK_INITIAL_SIZE_GB:=${GIT_STORE_DISK_INITIAL_SIZE_GB:=12}}"
+: "${GIT_BARE_STORE_DISK_INITIAL_SIZE_GB:=12}"
 : "${NIX_STORE_DISK_INITIAL_SIZE_GB:=90}"
 : "${BUILD_CHAINS_DISK_INITIAL_SIZE_GB:=16}"
 : "${VM_IMAGES_DISK_INITIAL_SIZE_GB:=120}"
 : "${DATA_DISK_NAME:=User Data}"
 : "${DATA_DISK_USER_DATA_NAME:=${DATA_DISK_NAME}}"
 : "${DATA_DISK_USER_LIBRARY_NAME:=User Library}"
-: "${DATA_DISK_GIT_STORE_NAME:=Git Store}"
+: "${DATA_DISK_GIT_WORKTREE_STORE_NAME:=${DATA_DISK_GIT_STORE_NAME:=Git Worktree Store}}"
+: "${DATA_DISK_GIT_BARE_STORE_NAME:=Git Bare Store}"
 : "${DATA_DISK_NIX_STORE_NAME:=Nix Store}"
 : "${DATA_DISK_BUILD_CHAINS_NAME:=Build Cache}"
 : "${DATA_DISK_VM_IMAGES_NAME:=VM Images}"
@@ -76,8 +78,10 @@ fi
 : "${VM_IMAGES_SUBVOLUME_SPECS:=lima:.lima tart:.tart}" 
 : "${VM_IMAGES_SUBVOLUME_FSTAB:=1}"
 : "${VM_IMAGES_SUBVOLUME_MOUNT_OPTS:=rw,nobrowse}"
-: "${GIT_STORE_CONFIGURE_SYSTEM_MOUNT:=1}"
-: "${GIT_STORE_SYSTEM_MOUNT_POINT:=/private/var/lib/git}"
+: "${GIT_WORKTREE_STORE_CONFIGURE_SYSTEM_MOUNT:=${GIT_STORE_CONFIGURE_SYSTEM_MOUNT:=1}}"
+: "${GIT_WORKTREE_STORE_SYSTEM_MOUNT_POINT:=${GIT_STORE_SYSTEM_MOUNT_POINT:=/private/var/lib/git/worktrees}}"
+: "${GIT_BARE_STORE_CONFIGURE_SYSTEM_MOUNT:=1}"
+: "${GIT_BARE_STORE_SYSTEM_MOUNT_POINT:=/private/var/lib/git/bare}"
 : "${NIX_STORE_CONFIGURE_SYSTEM_MOUNT:=1}"
 : "${NIX_STORE_SYSTEM_MOUNT_POINT:=/nix}"
 : "${NIX_STORE_CONFIGURE_SYNTHETIC:=1}"
@@ -287,7 +291,8 @@ fi
 DISK_NAMES=(
   "${DATA_DISK_USER_DATA_NAME}"
   "${DATA_DISK_USER_LIBRARY_NAME}"
-  "${DATA_DISK_GIT_STORE_NAME}"
+  "${DATA_DISK_GIT_BARE_STORE_NAME}"
+  "${DATA_DISK_GIT_WORKTREE_STORE_NAME}"
   "${DATA_DISK_NIX_STORE_NAME}"
   "${DATA_DISK_BUILD_CHAINS_NAME}"
   "${DATA_DISK_VM_IMAGES_NAME}"
@@ -300,13 +305,15 @@ fi
 
 USER_DATA_MOUNT_POINT=""
 USER_LIBRARY_MOUNT_POINT=""
-GIT_STORE_MOUNT_POINT=""
+GIT_BARE_STORE_MOUNT_POINT=""
+GIT_WORKTREE_STORE_MOUNT_POINT=""
 NIX_STORE_MOUNT_POINT=""
 BUILD_CHAINS_MOUNT_POINT=""
 VM_IMAGES_MOUNT_POINT=""
 USER_DATA_VOL_REF=""
 USER_LIBRARY_VOL_REF=""
-GIT_STORE_VOL_REF=""
+GIT_BARE_STORE_VOL_REF=""
+GIT_WORKTREE_STORE_VOL_REF=""
 NIX_STORE_VOL_REF=""
 BUILD_CHAINS_VOL_REF=""
 VM_IMAGES_VOL_REF=""
@@ -323,7 +330,8 @@ for idx in "${!DISK_NAMES[@]}"; do
   case "${DATA_DISK_LABEL}" in
     "${DATA_DISK_USER_DATA_NAME}") INITIAL_SIZE_GB="${USER_DATA_DISK_INITIAL_SIZE_GB}" ;;
     "${DATA_DISK_USER_LIBRARY_NAME}") INITIAL_SIZE_GB="${USER_LIBRARY_DISK_INITIAL_SIZE_GB}" ;;
-    "${DATA_DISK_GIT_STORE_NAME}") INITIAL_SIZE_GB="${GIT_STORE_DISK_INITIAL_SIZE_GB}" ;;
+    "${DATA_DISK_GIT_BARE_STORE_NAME}") INITIAL_SIZE_GB="${GIT_BARE_STORE_DISK_INITIAL_SIZE_GB}" ;;
+    "${DATA_DISK_GIT_WORKTREE_STORE_NAME}") INITIAL_SIZE_GB="${GIT_WORKTREE_STORE_DISK_INITIAL_SIZE_GB}" ;;
     "${DATA_DISK_NIX_STORE_NAME}") INITIAL_SIZE_GB="${NIX_STORE_DISK_INITIAL_SIZE_GB}" ;;
     "${DATA_DISK_BUILD_CHAINS_NAME}") INITIAL_SIZE_GB="${BUILD_CHAINS_DISK_INITIAL_SIZE_GB}" ;;
     "${DATA_DISK_VM_IMAGES_NAME}") INITIAL_SIZE_GB="${VM_IMAGES_DISK_INITIAL_SIZE_GB}" ;;
@@ -412,9 +420,12 @@ for idx in "${!DISK_NAMES[@]}"; do
   elif [[ "${DATA_DISK_LABEL}" == "${DATA_DISK_USER_LIBRARY_NAME}" ]]; then
     USER_LIBRARY_MOUNT_POINT="${DATA_MOUNT_POINT}"
     USER_LIBRARY_VOL_REF="${DATA_VOL_REF}"
-  elif [[ "${DATA_DISK_LABEL}" == "${DATA_DISK_GIT_STORE_NAME}" ]]; then
-    GIT_STORE_MOUNT_POINT="${DATA_MOUNT_POINT}"
-    GIT_STORE_VOL_REF="${DATA_VOL_REF}"
+  elif [[ "${DATA_DISK_LABEL}" == "${DATA_DISK_GIT_BARE_STORE_NAME}" ]]; then
+    GIT_BARE_STORE_MOUNT_POINT="${DATA_MOUNT_POINT}"
+    GIT_BARE_STORE_VOL_REF="${DATA_VOL_REF}"
+  elif [[ "${DATA_DISK_LABEL}" == "${DATA_DISK_GIT_WORKTREE_STORE_NAME}" ]]; then
+    GIT_WORKTREE_STORE_MOUNT_POINT="${DATA_MOUNT_POINT}"
+    GIT_WORKTREE_STORE_VOL_REF="${DATA_VOL_REF}"
   elif [[ "${DATA_DISK_LABEL}" == "${DATA_DISK_NIX_STORE_NAME}" ]]; then
     NIX_STORE_MOUNT_POINT="${DATA_MOUNT_POINT}"
     NIX_STORE_VOL_REF="${DATA_VOL_REF}"
@@ -482,37 +493,71 @@ if [[ "${NIX_STORE_CONFIGURE_SYSTEM_MOUNT}" == "1" ]]; then
   fi
 fi
 
-: "Optionally mount dedicated Git Store volume to a stable system path"
-if [[ "${GIT_STORE_CONFIGURE_SYSTEM_MOUNT}" == "1" ]]; then
-  if [[ -n "${GIT_STORE_VOL_REF:-}" ]]; then
-    GIT_VOLUME_UUID="$(diskutil info -plist "${GIT_STORE_VOL_REF}" | plutil -extract VolumeUUID raw -o - - 2>/dev/null || true)"
-    if [[ -z "${GIT_VOLUME_UUID:-}" ]]; then
-      echo "Warning: unable to resolve VolumeUUID for ${GIT_STORE_VOL_REF}; skipping persistent ${GIT_STORE_SYSTEM_MOUNT_POINT} mount setup."
+: "Optionally mount dedicated Git Bare Store volume to a stable system path"
+if [[ "${GIT_BARE_STORE_CONFIGURE_SYSTEM_MOUNT}" == "1" ]]; then
+  if [[ -n "${GIT_BARE_STORE_VOL_REF:-}" ]]; then
+    GIT_BARE_VOLUME_UUID="$(diskutil info -plist "${GIT_BARE_STORE_VOL_REF}" | plutil -extract VolumeUUID raw -o - - 2>/dev/null || true)"
+    if [[ -z "${GIT_BARE_VOLUME_UUID:-}" ]]; then
+      echo "Warning: unable to resolve VolumeUUID for ${GIT_BARE_STORE_VOL_REF}; skipping persistent ${GIT_BARE_STORE_SYSTEM_MOUNT_POINT} mount setup."
     else
-      sudo mkdir -p "${GIT_STORE_SYSTEM_MOUNT_POINT}"
+      sudo mkdir -p "${GIT_BARE_STORE_SYSTEM_MOUNT_POINT}"
 
-      GIT_FSTAB_PREFIX="UUID=${GIT_VOLUME_UUID} ${GIT_STORE_SYSTEM_MOUNT_POINT} apfs"
-      GIT_FSTAB_LINE="${GIT_FSTAB_PREFIX} rw,nobrowse"
-      if ! grep -Fq "${GIT_FSTAB_PREFIX}" /etc/fstab 2>/dev/null; then
-        printf '%s\n' "${GIT_FSTAB_LINE}" | sudo tee -a /etc/fstab >/dev/null
+      GIT_BARE_FSTAB_PREFIX="UUID=${GIT_BARE_VOLUME_UUID} ${GIT_BARE_STORE_SYSTEM_MOUNT_POINT} apfs"
+      GIT_BARE_FSTAB_LINE="${GIT_BARE_FSTAB_PREFIX} rw,nobrowse"
+      if ! grep -Fq "${GIT_BARE_FSTAB_PREFIX}" /etc/fstab 2>/dev/null; then
+        printf '%s\n' "${GIT_BARE_FSTAB_LINE}" | sudo tee -a /etc/fstab >/dev/null
       fi
 
-      if ! volume_mounted_at_target "${GIT_STORE_VOL_REF}" "${GIT_STORE_SYSTEM_MOUNT_POINT}"; then
-        sudo diskutil unmount "${GIT_STORE_VOL_REF}" >/dev/null 2>&1 || true
-        sudo diskutil mount -mountPoint "${GIT_STORE_SYSTEM_MOUNT_POINT}" "${GIT_STORE_VOL_REF}" || true
+      if ! volume_mounted_at_target "${GIT_BARE_STORE_VOL_REF}" "${GIT_BARE_STORE_SYSTEM_MOUNT_POINT}"; then
+        sudo diskutil unmount "${GIT_BARE_STORE_VOL_REF}" >/dev/null 2>&1 || true
+        sudo diskutil mount -mountPoint "${GIT_BARE_STORE_SYSTEM_MOUNT_POINT}" "${GIT_BARE_STORE_VOL_REF}" || true
       fi
 
-      if volume_mounted_at_target "${GIT_STORE_VOL_REF}" "${GIT_STORE_SYSTEM_MOUNT_POINT}"; then
-        echo "Git Store mounted at ${GIT_STORE_SYSTEM_MOUNT_POINT} using volume ${GIT_STORE_VOL_REF} (${GIT_VOLUME_UUID})."
-        record_volume_status "git-store" "${GIT_STORE_VOL_REF}" "${GIT_STORE_SYSTEM_MOUNT_POINT}" "success" "mounted"
+      if volume_mounted_at_target "${GIT_BARE_STORE_VOL_REF}" "${GIT_BARE_STORE_SYSTEM_MOUNT_POINT}"; then
+        echo "Git Bare Store mounted at ${GIT_BARE_STORE_SYSTEM_MOUNT_POINT} using volume ${GIT_BARE_STORE_VOL_REF} (${GIT_BARE_VOLUME_UUID})."
+        record_volume_status "git-bare-store" "${GIT_BARE_STORE_VOL_REF}" "${GIT_BARE_STORE_SYSTEM_MOUNT_POINT}" "success" "mounted"
       else
-        echo "Warning: could not mount ${GIT_STORE_VOL_REF} at ${GIT_STORE_SYSTEM_MOUNT_POINT}; verify /etc/fstab and retry after reboot."
-        record_volume_status "git-store" "${GIT_STORE_VOL_REF}" "${GIT_STORE_SYSTEM_MOUNT_POINT}" "failed" "mount-failed"
+        echo "Warning: could not mount ${GIT_BARE_STORE_VOL_REF} at ${GIT_BARE_STORE_SYSTEM_MOUNT_POINT}; verify /etc/fstab and retry after reboot."
+        record_volume_status "git-bare-store" "${GIT_BARE_STORE_VOL_REF}" "${GIT_BARE_STORE_SYSTEM_MOUNT_POINT}" "failed" "mount-failed"
       fi
     fi
   else
-    echo "Warning: Git Store volume ref not detected; skipping ${GIT_STORE_SYSTEM_MOUNT_POINT} mount setup."
-    record_volume_status "git-store" "Git Store" "${GIT_STORE_SYSTEM_MOUNT_POINT}" "skipped" "volume-ref-missing"
+    echo "Warning: Git Bare Store volume ref not detected; skipping ${GIT_BARE_STORE_SYSTEM_MOUNT_POINT} mount setup."
+    record_volume_status "git-bare-store" "Git Bare Store" "${GIT_BARE_STORE_SYSTEM_MOUNT_POINT}" "skipped" "volume-ref-missing"
+  fi
+fi
+
+: "Optionally mount dedicated Git Worktree Store volume to a stable system path"
+if [[ "${GIT_WORKTREE_STORE_CONFIGURE_SYSTEM_MOUNT}" == "1" ]]; then
+  if [[ -n "${GIT_WORKTREE_STORE_VOL_REF:-}" ]]; then
+    GIT_WORKTREE_VOLUME_UUID="$(diskutil info -plist "${GIT_WORKTREE_STORE_VOL_REF}" | plutil -extract VolumeUUID raw -o - - 2>/dev/null || true)"
+    if [[ -z "${GIT_WORKTREE_VOLUME_UUID:-}" ]]; then
+      echo "Warning: unable to resolve VolumeUUID for ${GIT_WORKTREE_STORE_VOL_REF}; skipping persistent ${GIT_WORKTREE_STORE_SYSTEM_MOUNT_POINT} mount setup."
+    else
+      sudo mkdir -p "${GIT_WORKTREE_STORE_SYSTEM_MOUNT_POINT}"
+
+      GIT_WORKTREE_FSTAB_PREFIX="UUID=${GIT_WORKTREE_VOLUME_UUID} ${GIT_WORKTREE_STORE_SYSTEM_MOUNT_POINT} apfs"
+      GIT_WORKTREE_FSTAB_LINE="${GIT_WORKTREE_FSTAB_PREFIX} rw,nobrowse"
+      if ! grep -Fq "${GIT_WORKTREE_FSTAB_PREFIX}" /etc/fstab 2>/dev/null; then
+        printf '%s\n' "${GIT_WORKTREE_FSTAB_LINE}" | sudo tee -a /etc/fstab >/dev/null
+      fi
+
+      if ! volume_mounted_at_target "${GIT_WORKTREE_STORE_VOL_REF}" "${GIT_WORKTREE_STORE_SYSTEM_MOUNT_POINT}"; then
+        sudo diskutil unmount "${GIT_WORKTREE_STORE_VOL_REF}" >/dev/null 2>&1 || true
+        sudo diskutil mount -mountPoint "${GIT_WORKTREE_STORE_SYSTEM_MOUNT_POINT}" "${GIT_WORKTREE_STORE_VOL_REF}" || true
+      fi
+
+      if volume_mounted_at_target "${GIT_WORKTREE_STORE_VOL_REF}" "${GIT_WORKTREE_STORE_SYSTEM_MOUNT_POINT}"; then
+        echo "Git Worktree Store mounted at ${GIT_WORKTREE_STORE_SYSTEM_MOUNT_POINT} using volume ${GIT_WORKTREE_STORE_VOL_REF} (${GIT_WORKTREE_VOLUME_UUID})."
+        record_volume_status "git-worktree-store" "${GIT_WORKTREE_STORE_VOL_REF}" "${GIT_WORKTREE_STORE_SYSTEM_MOUNT_POINT}" "success" "mounted"
+      else
+        echo "Warning: could not mount ${GIT_WORKTREE_STORE_VOL_REF} at ${GIT_WORKTREE_STORE_SYSTEM_MOUNT_POINT}; verify /etc/fstab and retry after reboot."
+        record_volume_status "git-worktree-store" "${GIT_WORKTREE_STORE_VOL_REF}" "${GIT_WORKTREE_STORE_SYSTEM_MOUNT_POINT}" "failed" "mount-failed"
+      fi
+    fi
+  else
+    echo "Warning: Git Worktree Store volume ref not detected; skipping ${GIT_WORKTREE_STORE_SYSTEM_MOUNT_POINT} mount setup."
+    record_volume_status "git-worktree-store" "Git Worktree Store" "${GIT_WORKTREE_STORE_SYSTEM_MOUNT_POINT}" "skipped" "volume-ref-missing"
   fi
 fi
 
@@ -709,9 +754,9 @@ if [[ -n "${USER_LIBRARY_MOUNT_POINT:-}" && "${DATA_COPY_USER_LIBRARY}" == "1" ]
   fi
 fi
 
-if [[ -n "${GIT_STORE_MOUNT_POINT:-}" && "${DATA_COPY_GIT_STORE}" == "1" ]]; then
+if [[ -n "${GIT_WORKTREE_STORE_MOUNT_POINT:-}" && "${DATA_COPY_GIT_STORE}" == "1" ]]; then
   SRC_GIT_STORE="${ACTUAL_HOME_DIR}/Git Store"
-  DST_GIT_STORE="${GIT_STORE_MOUNT_POINT}/Git Store"
+  DST_GIT_STORE="${GIT_WORKTREE_STORE_MOUNT_POINT}/Git Store"
   if [[ -d "${SRC_GIT_STORE}" ]]; then
     sudo mkdir -p "${DST_GIT_STORE}"
     sudo ditto "${SRC_GIT_STORE}" "${DST_GIT_STORE}" || true

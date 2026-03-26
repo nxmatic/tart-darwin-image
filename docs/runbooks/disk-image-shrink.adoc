@@ -1,0 +1,120 @@
+= Runbook: Shrink host disk images (generic)
+
+This runbook describes a safe, rollback-friendly shrink workflow for any host-side disk image file used by a VM.
+
+Scope:
+
+* Any host running Tart.
+* Any attached disk image path (for example user data, caches, repositories, or tool stores).
+
+IMPORTANT:
+
+* Do not attempt in-place shrinking of active APFS-backed ASIF images.
+* Use cold migration: stop VM, copy to a new smaller image, swap, validate, keep rollback image.
+
+== Goal
+
+Move from older/larger disk images to smaller ones while preserving data and maintaining a fast rollback path.
+
+== Preconditions
+
+* You have shell access to the host where Tart runs.
+* You can stop/start the target VM.
+* You know the VM name and current disk image path(s).
+* Host has enough free space to hold old and new images during migration.
+
+== High-level strategy
+
+. Stop VM (required).
+. Inventory existing image size and used space.
+. Create a new image with target size.
+. Copy data from old image to new image (offline).
+. Swap VM attachment to new image path.
+. Boot VM and validate workloads.
+. Keep old image for rollback until confidence window is complete.
+
+== Recommended helper script
+
+Use:
+
+* `scripts/shrink-disk-image.sh`
+
+The script is path-based and role-agnostic.
+It can shrink any source image file into a new target image, then optionally replace the source in place.
+
+== Phase 1: Inventory and safety snapshot
+
+Capture for each image you plan to shrink:
+
+* file path
+* logical size (`ls -lh`)
+* physical consumption (`du -h`)
+
+Record values in your change log.
+
+Create a migration marker directory near the disk files, for example:
+
+* `<disk_dir>/migration-<date>/`
+
+== Phase 2: Stop VM and ensure disks are detached
+
+. Stop the target VM cleanly.
+. Confirm target image files are not attached.
+
+Do not proceed while VM is running.
+
+== Phase 3: Create target image and copy data
+
+Use the helper script for each source image path.
+
+Example flow per image:
+
+. choose target size
+. run script with `--source-image` and `--target-size-gb`
+. review output and produced target image
+
+If you want automatic source replacement after copy, include `--replace-source`.
+A backup of the original source image is retained.
+
+== Phase 4: Swap image paths
+
+If you did not use `--replace-source`, switch VM attachment to the new image by either:
+
+* updating explicit image path overrides, or
+* renaming files so default expected names point to new images.
+
+Keep old images under rollback names.
+
+== Phase 5: Boot and validate
+
+Boot VM and validate:
+
+* expected mount points are present
+* key workloads read/write successfully
+* tooling and caches behave normally
+
+Validation suggestions:
+
+* run representative project commands that use each migrated image
+* verify no unexpected permission changes
+
+== Phase 6: Observation and cleanup
+
+Recommended confidence window:
+
+* at least 24-72h or 2-3 successful VM boot cycles
+
+After confidence window:
+
+* archive old images to long-term backup OR remove them to reclaim host space
+
+== Rollback
+
+If validation fails:
+
+. Stop VM.
+. Restore old image attachment/path.
+. Start VM.
+. Re-validate baseline behavior.
+
+Because old files are preserved throughout migration, rollback is immediate.
