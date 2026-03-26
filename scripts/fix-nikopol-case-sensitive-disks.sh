@@ -108,14 +108,35 @@ rsync_help_text() {
   rsync --help 2>&1 || true
 }
 
+rsync_probe_opt() {
+  local opt="$1"
+  local out
+  set +e
+  out="$(rsync "$opt" --version 2>&1)"
+  local ec=$?
+  set -e
+
+  if [[ "$ec" -eq 0 ]]; then
+    return 0
+  fi
+
+  # Common unknown-option signatures across Apple/GNU rsync builds.
+  if printf '%s\n' "$out" | grep -Eiq 'unknown option|unrecognized option|invalid option'; then
+    return 1
+  fi
+
+  # Conservative fallback: if we cannot prove support, treat as unsupported.
+  return 1
+}
+
 rsync_supports_long_opt() {
   local opt="$1"
-  rsync_help_text | grep -Eq -- "(^|[[:space:],])${opt}(,|[[:space:]]|$)"
+  rsync_probe_opt "$opt"
 }
 
 rsync_supports_short_opt() {
   local opt="$1"
-  rsync_help_text | grep -Eq -- "(^|[[:space:]])${opt}([[:space:],]|$)"
+  rsync_probe_opt "$opt"
 }
 
 init_rsync_args() {
@@ -187,7 +208,7 @@ attach_and_get_mount() {
   fi
 
   base_dev="$(printf '%s\n' "$out" | awk '/^\/dev\/disk[0-9]+/{print $1; exit}')"
-  mount="$(printf '%s\n' "$out" | awk '/\/Volumes\//{print $NF; exit}')"
+  mount="$(printf '%s\n' "$out" | awk 'match($0,/\/Volumes\/.*/){print substr($0,RSTART); exit}')"
 
   if [[ -z "$base_dev" ]]; then
     echo "Failed to resolve base device for image: $image" >&2
