@@ -289,6 +289,40 @@ assert_case_sensitive() {
   [[ "$inode_lower" != "$inode_upper" ]]
 }
 
+ensure_case_sensitive_image() {
+  local image="$1"
+  local volume_label="$2"
+  local attached base_dev mount vol_dev
+
+  if assert_case_sensitive "$image"; then
+    return 0
+  fi
+
+  log "WARN: image was created case-insensitive; enforcing Case-sensitive APFS via reformat: $image"
+
+  attached="$(attach_and_get_mount "$image" 0)"
+  base_dev="${attached%%|*}"
+  mount="${attached#*|}"
+
+  vol_dev="$(diskutil info "$mount" | awk -F': *' '/Device Node/{print $2; exit}')"
+  if [[ -z "$vol_dev" ]]; then
+    diskutil unmount force "$mount" >/dev/null 2>&1 || true
+    diskutil detach "$base_dev" >/dev/null 2>&1 || true
+    echo "ERROR: could not resolve APFS volume device for reformat: $image" >&2
+    return 1
+  fi
+
+  diskutil eraseVolume "Case-sensitive APFS" "$volume_label" "$vol_dev" >/dev/null
+
+  diskutil unmount force "$mount" >/dev/null 2>&1 || true
+  diskutil detach "$base_dev" >/dev/null 2>&1 || true
+
+  if ! assert_case_sensitive "$image"; then
+    echo "ERROR: failed to enforce case-sensitive filesystem on: $image" >&2
+    return 1
+  fi
+}
+
 copy_data() {
   local src_img="$1"
   local dst_img="$2"
@@ -362,6 +396,8 @@ for spec in "${SPECS[@]}"; do
   run diskutil image create blank --format ASIF --size "${size_gb}G" --fs "Case-sensitive APFS" --volumeName "$volume_label" "$staging"
 
   if [[ "$APPLY" -eq 1 ]]; then
+    ensure_case_sensitive_image "$staging" "$volume_label"
+
     log "Copying data: $src -> $staging"
     copy_data "$src" "$staging"
 
