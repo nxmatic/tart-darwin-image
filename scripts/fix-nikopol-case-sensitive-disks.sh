@@ -110,6 +110,14 @@ SPECS=(
 log() { printf '%s\n' "$*"; }
 
 RSYNC_ARGS=()
+RSYNC_EXCLUDES=(
+  --exclude='.ssh/agent/'
+  --exclude='**/*.sock'
+  --exclude='Library/Caches/**'
+  --exclude='Library/Containers/*/Data/Library/Caches/**'
+  --exclude='Library/Containers/*/Data/SystemData/com.apple.chrono/**'
+  --exclude='Library/Containers/com.apple.mediaanalysisd/Data/Library/Caches/**'
+)
 
 rsync_help_text() {
   rsync --help 2>&1 || true
@@ -274,6 +282,7 @@ copy_data() {
   local src_img="$1"
   local dst_img="$2"
   local src_attached dst_attached src_dev src_mount dst_dev dst_mount
+  local rsync_ec=0
 
   src_attached="$(attach_and_get_mount "$src_img" 1)"
   src_dev="${src_attached%%|*}"
@@ -283,12 +292,23 @@ copy_data() {
   dst_dev="${dst_attached%%|*}"
   dst_mount="${dst_attached#*|}"
 
-  rsync "${RSYNC_ARGS[@]}" "$src_mount/" "$dst_mount/"
+  set +e
+  rsync "${RSYNC_ARGS[@]}" "${RSYNC_EXCLUDES[@]}" "$src_mount/" "$dst_mount/"
+  rsync_ec=$?
+  set -e
+
+  if [[ "$rsync_ec" -ne 0 && "$rsync_ec" -ne 24 ]]; then
+    echo "ERROR: rsync failed with exit code $rsync_ec" >&2
+  fi
 
   diskutil unmount force "$src_mount" >/dev/null 2>&1 || true
   diskutil unmount force "$dst_mount" >/dev/null 2>&1 || true
   diskutil detach "$src_dev" >/dev/null 2>&1 || true
   diskutil detach "$dst_dev" >/dev/null 2>&1 || true
+
+  if [[ "$rsync_ec" -ne 0 && "$rsync_ec" -ne 24 ]]; then
+    return "$rsync_ec"
+  fi
 }
 
 ts="$(date +%Y%m%d-%H%M%S)"
@@ -302,6 +322,7 @@ log "STAGING_DIR=$STAGING_DIR"
 log "MODE=$([[ "$APPLY" -eq 1 ]] && echo apply || echo dry-run)"
 log "ACTIVATE=$ACTIVATE"
 log "RSYNC_ARGS=${RSYNC_ARGS[*]}"
+log "RSYNC_EXCLUDES=${RSYNC_EXCLUDES[*]}"
 
 run mkdir -p "$STAGING_DIR"
 
