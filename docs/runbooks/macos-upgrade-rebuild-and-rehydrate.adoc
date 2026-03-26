@@ -192,6 +192,42 @@ OldRoot --> NewRoot : do NOT clone root blindly
 . Validate account identity, home location, mounted role disks, and critical toolchains.
 . Validate update flow (`softwareupdate`) on the new root image.
 
+==== Live guest hotfix workflow (packer script mirror)
+
+When a VM is already running and a provisioning fix is needed immediately, use the guest-side
+Packer script mirror (`/opt/tart/packer.d/scripts`) to apply the same scripts live before a full rebuild.
+
+Why this is useful:
+
+* Lets operators validate script fixes directly on the live guest.
+* Reduces turnaround during troubleshooting (no full image rebuild required for first verification).
+* Keeps the runtime fix path aligned with the repo’s provisioning scripts.
+
+Sync host scripts into the guest mirror:
+
+[source,bash]
+----
+# Ensure mirror root exists inside guest
+tart exec nikopol -- sudo mkdir -p /opt/tart/packer.d
+
+# Stream local scripts/ into guest /opt/tart/packer.d/scripts
+tar -cf - scripts | tart exec -i nikopol -- sudo tar -xvf - -C /opt/tart/packer.d
+----
+
+Then run the needed script from the mirrored path, for example:
+
+[source,bash]
+----
+tart exec nikopol -- sudo bash -x /opt/tart/packer.d/scripts/install-nix-installer.sh
+----
+
+Operational guidance:
+
+* Treat this as a fast troubleshooting/hotfix path; promote successful changes back into repo and rebuild.
+* Prefer scripts that are designed to be idempotent and environment-driven.
+* For root-protected files on sealed macOS (for example `/etc/fstab`), use supported tooling/workflows and
+  expect that some edits may still require reboot/rebuild sequencing.
+
 === Phase 5 — Cutover and rollback window
 
 . Switch normal usage to new VM.
