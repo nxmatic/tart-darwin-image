@@ -217,26 +217,10 @@ verify_primary_account_state() {
 }
 
 verify_legacy_admin_absent() {
-  if [[ "${PRIMARY_ACCOUNT_NAME}" == "admin" ]]; then
-    return 0
-  fi
-
   if dscl . -read /Users/admin >/dev/null 2>&1; then
-    echo "Error: legacy '/Users/admin' account record still exists after primary reconciliation; refusing ambiguous primary state." >&2
-    exit 1
-  fi
-
-  echo "Verified legacy admin account record is absent."
-}
-
-delete_legacy_admin_record() {
-  if [[ "${PRIMARY_ACCOUNT_NAME}" == "admin" ]]; then
-    return 0
-  fi
-
-  if dscl . -read /Users/admin >/dev/null 2>&1; then
-    echo "Removing legacy admin account record now that primary reconciliation is complete."
-    sudo dscl . -delete /Users/admin >/dev/null 2>&1 || true
+    echo "Verified system admin account record is preserved: /Users/admin"
+  else
+    echo "Warning: expected system admin account record '/Users/admin' is missing." >&2
   fi
 }
 
@@ -335,7 +319,6 @@ if dscl . -read "/Users/${PRIMARY_ACCOUNT_NAME}" >/dev/null 2>&1; then
   ensure_primary_secure_token
   verify_primary_uid
   verify_primary_account_state
-  delete_legacy_admin_record
   verify_legacy_admin_absent
   exit 0
 fi
@@ -353,7 +336,6 @@ ensure_primary_secure_token
 
 verify_primary_uid
 verify_primary_account_state
-delete_legacy_admin_record
 verify_legacy_admin_absent
 
 echo "Primary account rename complete for clone mode: admin -> ${PRIMARY_ACCOUNT_NAME}"

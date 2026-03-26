@@ -18,8 +18,47 @@ fi
 : "${SECONDARY_ADMIN_PASSWORD:=super}"
 : "${SYSTEM_ADMIN_NAME:=admin}"
 : "${SYSTEM_ADMIN_PASSWORD:=admin}"
-: "${MACOS_DEBUG_MODE:=1}"
 : "${PRIMARY_SECURE_TOKEN_ENFORCE:=1}"
+
+resolve_auto_login_password() {
+  local user_name="$1"
+  case "${user_name}" in
+    "${PRIMARY_ACCOUNT_NAME}")
+      printf '%s\n' "${PRIMARY_ACCOUNT_PASSWORD}"
+      return 0
+      ;;
+    "${SECONDARY_ADMIN_NAME}")
+      printf '%s\n' "${SECONDARY_ADMIN_PASSWORD}"
+      return 0
+      ;;
+    "${SYSTEM_ADMIN_NAME}")
+      printf '%s\n' "${SYSTEM_ADMIN_PASSWORD}"
+      return 0
+      ;;
+    *)
+      echo "Warning: auto-login user '${user_name}' has no explicit password mapping; falling back to primary password." >&2
+      printf '%s\n' "${PRIMARY_ACCOUNT_PASSWORD}"
+      return 0
+      ;;
+  esac
+}
+
+write_kcpassword() {
+  local password="$1"
+  perl -e '
+    use strict;
+    use warnings;
+    my $password = shift // q{};
+    my @key = (0x7D, 0x89, 0x52, 0x23, 0xD2, 0xBC, 0xDD, 0xEA, 0xA3, 0xB9, 0x1F);
+    my $plain = $password . "\\0";
+    my $out = q{};
+    for (my $i = 0; $i < length($plain); $i++) {
+      $out .= chr(ord(substr($plain, $i, 1)) ^ $key[$i % scalar(@key)]);
+    }
+    print $out;
+  ' -- "${password}" | sudo tee /etc/kcpassword >/dev/null
+  sudo chmod 0600 /etc/kcpassword
+}
 
 ensure_secondary_admin_prerequisites() {
   local ensure_script token_status
@@ -102,18 +141,17 @@ ensure_primary_secure_token_from_secondary() {
 }
 
 apply_final_auto_login_policy() {
-  local target_auto_login
+  local target_auto_login target_auto_login_password
 
-  if [[ "${MACOS_DEBUG_MODE}" == "1" ]]; then
-    target_auto_login="${SECONDARY_ADMIN_NAME}"
-  else
-    target_auto_login="${PRIMARY_ACCOUNT_NAME}"
-  fi
+  # Canonical policy: keep image autologin on secondary admin account.
+  target_auto_login="${SECONDARY_ADMIN_NAME}"
 
+  target_auto_login_password="$(resolve_auto_login_password "${target_auto_login}")"
+  write_kcpassword "${target_auto_login_password}"
   sudo defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser "${target_auto_login}"
   sudo defaults write /Library/Preferences/com.apple.loginwindow SHOWFULLNAME -bool false || true
   sudo defaults write /Library/Preferences/com.apple.loginwindow Hide500Users -bool false || true
-  echo "Final autoLoginUser policy applied: ${target_auto_login} (MACOS_DEBUG_MODE=${MACOS_DEBUG_MODE})"
+  echo "Final autoLoginUser policy applied: ${target_auto_login} (canonical image policy)"
 }
 
 ensure_secondary_admin_prerequisites

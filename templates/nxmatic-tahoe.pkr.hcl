@@ -305,6 +305,12 @@ variable "macos_darwin_boot_args" {
   description = "Boot-args tokens to ensure in NVRAM (for example '-v' for verbose Darwin boot logs)."
 }
 
+variable "macos_relax_session_tweaks" {
+  type        = bool
+  default     = true
+  description = "When true, run session-dependent UX tweaks in best-effort mode (recommended for headless packer reliability). Set false for strict fail-fast behavior."
+}
+
 variable "macos_data_home_user" {
   type        = string
   default     = "nxmatic"
@@ -644,8 +650,9 @@ build {
       "TART_GUEST_AGENT_USER='${local.effective_auto_login_user}'",
       "DARWIN_ENABLE_BOOT_ARGS='${var.macos_enable_darwin_boot_args ? 1 : 0}'",
       "DARWIN_BOOT_ARGS='${var.macos_darwin_boot_args}'",
+      "RELAX_SESSION_TWEAKS='${var.macos_relax_session_tweaks ? 1 : 0}'",
       "DATA_HOME_USER='${var.macos_data_home_user}'",
-      "DATA_DISK_HOME_NAME='${var.macos_data_home_user} Users'",
+      "DATA_DISK_HOME_NAME='Users:${var.macos_data_home_user}'",
       "DATA_DISK_LIBRARY_CACHE_NAME='${var.macos_data_home_user} Library Cache'",
       "DATA_DISK_BUILD_CHAINS_CACHE_NAME='${var.macos_data_home_user} Build Chains Cache'",
       "DATA_DISK_VM_IMAGES_NAME='${var.macos_data_home_user} VM Images'",
@@ -665,6 +672,17 @@ build {
       "chmod 0600 '${var.macos_vm_scripts_dir}/.envrc'",
       "printf '%s\\n' \"$runtime_envrc\" > '${var.macos_env_pointer_file}'",
       "chmod 0600 '${var.macos_env_pointer_file}'",
+    ]
+  }
+
+  provisioner "shell" {
+    inline = [
+      "set -euo pipefail",
+      "sudo install -d -m 0755 /opt/tart/packer.d",
+      "sudo rm -rf /opt/tart/packer.d/scripts",
+      "sudo cp -R '${var.macos_vm_scripts_dir}' /opt/tart/packer.d/scripts",
+      "sudo chmod -R a+rX /opt/tart/packer.d/scripts",
+      "echo 'Snapshot of packer scripts available at /opt/tart/packer.d/scripts'",
     ]
   }
 
@@ -732,8 +750,10 @@ build {
     inline = [
       "set -euo pipefail",
       "if [ '${var.attach_data_disk_during_build}' != 'true' ]; then echo 'Skipping install-nix-installer.sh (attach_data_disk_during_build=false).'; exit 0; fi",
-      "if [ '${local.run_nix_install_stage}' != 'true' ]; then echo 'Skipping install-nix-installer.sh (provision_profile=${var.provision_profile}).'; exit 0; fi",
-      "env MACOS_ENV_FILE=\"$(cat '${var.macos_env_pointer_file}')\" NIX_INSTALLER_URL='${var.nix_installer_url}' NIX_INSTALLER_PATH='${var.nix_installer_path}' NIX_INSTALL_AT_BUILD='${var.nix_install_at_build}' bash -euxo pipefail '${var.macos_vm_scripts_dir}/install-nix-installer.sh'",
+      "if [ '${local.run_nix_install_stage}' != 'true' ] && [ '${local.run_nxmatic_customization}' != 'true' ]; then echo 'Skipping install-nix-installer.sh (provision_profile=${var.provision_profile}).'; exit 0; fi",
+      "nix_install_at_build='${var.nix_install_at_build}'",
+      "if [ '${local.run_nix_install_stage}' != 'true' ]; then nix_install_at_build='0'; fi",
+      "env MACOS_ENV_FILE=\"$(cat '${var.macos_env_pointer_file}')\" NIX_INSTALLER_URL='${var.nix_installer_url}' NIX_INSTALLER_PATH='${var.nix_installer_path}' NIX_INSTALL_AT_BUILD=\"${nix_install_at_build}\" bash -euxo pipefail '${var.macos_vm_scripts_dir}/install-nix-installer.sh'",
     ]
   }
 
@@ -809,7 +829,7 @@ build {
       "mkdir -p \"$(dirname '${local.effective_nix_store_disk_image_path}')\"",
       "mkdir -p \"$(dirname '${local.effective_user_build_chains_cache_disk_image_path}')\"",
       "mkdir -p \"$(dirname '${local.effective_user_vm_images_disk_image_path}')\"",
-      "if [ -f \"${local.effective_user_data_disk_image_path}\" ]; then echo \"Reusing existing Data Home disk image: ${local.effective_user_data_disk_image_path}\"; else diskutil image create blank --format ASIF --size ${var.user_data_disk_max_size_gb}G --volumeName 'Data-Home-${var.macos_data_home_user}' \"${local.effective_user_data_disk_image_path}\"; fi",
+      "if [ -f \"${local.effective_user_data_disk_image_path}\" ]; then echo \"Reusing existing Data Home disk image: ${local.effective_user_data_disk_image_path}\"; else diskutil image create blank --format ASIF --size ${var.user_data_disk_max_size_gb}G --volumeName 'Users:${var.macos_data_home_user}' \"${local.effective_user_data_disk_image_path}\"; fi",
       "if [ -f \"${local.effective_user_library_disk_image_path}\" ]; then echo \"Reusing existing Data Library Cache disk image: ${local.effective_user_library_disk_image_path}\"; else diskutil image create blank --format ASIF --size ${var.user_library_disk_max_size_gb}G --volumeName 'Data Library Cache ${var.macos_data_home_user}' \"${local.effective_user_library_disk_image_path}\"; fi",
       "if [ -f \"${local.effective_git_bare_store_disk_image_path}\" ]; then echo \"Reusing existing Git Bare Store disk image: ${local.effective_git_bare_store_disk_image_path}\"; else diskutil image create blank --format ASIF --size ${var.git_bare_store_disk_max_size_gb}G --volumeName 'Git Bare Store' \"${local.effective_git_bare_store_disk_image_path}\"; fi",
       "if [ -f \"${local.effective_git_store_disk_image_path}\" ]; then echo \"Reusing existing Git Store disk image: ${local.effective_git_store_disk_image_path}\"; else diskutil image create blank --format ASIF --size ${var.git_store_disk_max_size_gb}G --volumeName 'Git Store' \"${local.effective_git_store_disk_image_path}\"; fi",

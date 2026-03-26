@@ -4,37 +4,44 @@ dscl_plist_attr_values() {
   local record_path="$1"
   local attr_name="$2"
 
-  if ! command -v python3 >/dev/null 2>&1; then
-    return 1
-  fi
+  # Parse plain `dscl -read` output to avoid requiring python3/CLT in guest.
+  # Supported shapes:
+  #   Attr: value
+  #   Attr:
+  #    value1
+  #    value2
+  dscl . -read "${record_path}" "${attr_name}" 2>/dev/null \
+    | awk -v attr="${attr_name}" '
+      BEGIN {
+        in_attr = 0
+      }
+      {
+        if ($0 ~ ("^" attr ":")) {
+          in_attr = 1
+          line = $0
+          sub("^" attr ":[[:space:]]*", "", line)
+          if (length(line) > 0) {
+            print line
+          }
+          next
+        }
 
-  dscl . -read -plist "${record_path}" "${attr_name}" 2>/dev/null \
-    | python3 - "${attr_name}" <<'PY'
-import plistlib
-import sys
+        if (!in_attr) {
+          next
+        }
 
-attr = sys.argv[1]
-key = f"dsAttrTypeStandard:{attr}"
+        # Stop when another top-level key starts.
+        if ($0 ~ /^[^[:space:]]/) {
+          exit
+        }
 
-try:
-    payload = plistlib.load(sys.stdin.buffer)
-except Exception:
-    raise SystemExit(0)
-
-values = payload.get(key, [])
-if isinstance(values, list):
-    for value in values:
-        if value is None:
-            continue
-        if isinstance(value, bytes):
-            try:
-                value = value.decode()
-            except Exception:
-                value = str(value)
-        print(str(value))
-elif values is not None:
-    print(str(values))
-PY
+        line = $0
+        sub(/^[[:space:]]+/, "", line)
+        if (length(line) > 0) {
+          print line
+        }
+      }
+    '
 }
 
 dscl_plist_first_attr() {

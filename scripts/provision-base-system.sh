@@ -23,9 +23,71 @@ fi
 : "${PRIMARY_ACCOUNT_NAME:=admin}"
 : "${PRIMARY_ACCOUNT_FULL_NAME:=Stephane Lacoin (aka nxmatic)}"
 : "${PRIMARY_ACCOUNT_ALIAS:=nxmatic}"
+: "${PRIMARY_ACCOUNT_PASSWORD:=admin}"
+: "${SECONDARY_ADMIN_NAME:=super}"
+: "${SECONDARY_ADMIN_PASSWORD:=super}"
+: "${SYSTEM_ADMIN_NAME:=admin}"
+: "${SYSTEM_ADMIN_PASSWORD:=admin}"
 : "${AUTO_LOGIN_USER:=${PRIMARY_ACCOUNT_NAME}}"
 : "${DARWIN_ENABLE_BOOT_ARGS:=1}"
 : "${DARWIN_BOOT_ARGS:=-v}"
+: "${RELAX_SESSION_TWEAKS:=1}"
+
+resolve_auto_login_password() {
+	local user_name="$1"
+	case "${user_name}" in
+		"${PRIMARY_ACCOUNT_NAME}")
+			printf '%s\n' "${PRIMARY_ACCOUNT_PASSWORD}"
+			return 0
+			;;
+		"${SECONDARY_ADMIN_NAME}")
+			printf '%s\n' "${SECONDARY_ADMIN_PASSWORD}"
+			return 0
+			;;
+		"${SYSTEM_ADMIN_NAME}")
+			printf '%s\n' "${SYSTEM_ADMIN_PASSWORD}"
+			return 0
+			;;
+		*)
+			echo "Warning: AUTO_LOGIN_USER='${user_name}' has no explicit password mapping; falling back to PRIMARY_ACCOUNT_PASSWORD." >&2
+			printf '%s\n' "${PRIMARY_ACCOUNT_PASSWORD}"
+			return 0
+			;;
+	esac
+}
+
+write_kcpassword() {
+	local password="$1"
+	# Keep /etc/kcpassword synchronized with configured autoLoginUser password.
+	# Uses the historical xor key expected by macOS loginwindow.
+	perl -e '
+		use strict;
+		use warnings;
+		my $password = shift // q{};
+		my @key = (0x7D, 0x89, 0x52, 0x23, 0xD2, 0xBC, 0xDD, 0xEA, 0xA3, 0xB9, 0x1F);
+		my $plain = $password . "\\0";
+		my $out = q{};
+		for (my $i = 0; $i < length($plain); $i++) {
+			$out .= chr(ord(substr($plain, $i, 1)) ^ $key[$i % scalar(@key)]);
+		}
+		print $out;
+	' -- "${password}" | sudo tee /etc/kcpassword >/dev/null
+	sudo chmod 0600 /etc/kcpassword
+}
+
+run_session_tweak() {
+	local description="$1"
+	shift
+	if [[ "${RELAX_SESSION_TWEAKS}" == "1" ]]; then
+		: "${description} (best-effort mode)"
+		if ! "$@"; then
+			echo "Warning: ${description} failed in current provisioning context." >&2
+		fi
+	else
+		: "${description} (strict mode)"
+		"$@"
+	fi
+}
 
 apply_darwin_boot_args() {
 	local current_boot_args merged_boot_args arg
@@ -81,8 +143,8 @@ if [[ -n "${PRIMARY_ACCOUNT_ALIAS}" && "${PRIMARY_ACCOUNT_ALIAS}" != "${PRIMARY_
 fi
 
 : "Enable auto-login"
-: "See https://github.com/xfreebird/kcpassword for details."
-echo '00000000: 1ced 3f4a bcbc ba2c caca 4e82' | sudo xxd -r - /etc/kcpassword
+AUTO_LOGIN_PASSWORD="$(resolve_auto_login_password "${AUTO_LOGIN_USER}")"
+write_kcpassword "${AUTO_LOGIN_PASSWORD}"
 sudo defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser "${AUTO_LOGIN_USER}"
 sudo defaults write /Library/Preferences/com.apple.loginwindow SHOWFULLNAME -bool false
 sudo defaults write /Library/Preferences/com.apple.loginwindow Hide500Users -bool false
@@ -90,8 +152,9 @@ sudo defaults write /Library/Preferences/com.apple.loginwindow Hide500Users -boo
 : "Disable screensaver at login screen"
 sudo defaults write /Library/Preferences/com.apple.screensaver loginWindowIdleTime 0
 
-: "Disable screensaver for admin user"
-defaults -currentHost write com.apple.screensaver idleTime 0
+: "Disable screensaver for current user session (best-effort in headless build contexts)"
+run_session_tweak "write currentHost screensaver defaults (requires active GUI prefs domain)" \
+	defaults -currentHost write com.apple.screensaver idleTime 0
 
 : "Prevent the VM from sleeping"
 sudo systemsetup -setsleep Off 2>/dev/null
@@ -114,11 +177,14 @@ else
 fi
 
 : "Disable screen lock (works for logged-in user session)"
-sysadminctl -screenLock off -password admin
+run_session_tweak "disable screen lock" \
+	sysadminctl -screenLock off -password "${SYSTEM_ADMIN_PASSWORD:-admin}"
 
 : "Disable Siri for the user session"
-defaults write com.apple.assistant.support "Assistant Enabled" -bool false
-defaults write com.apple.Siri StatusMenuVisible -bool false
+run_session_tweak "disable Siri assistant support" \
+	defaults write com.apple.assistant.support "Assistant Enabled" -bool false
+run_session_tweak "hide Siri status menu" \
+	defaults write com.apple.Siri StatusMenuVisible -bool false
 
 : "Ensure expected home path exists for primary account"
 if [[ ! -d "${PRIMARY_ACCOUNT_HOME}" ]]; then
