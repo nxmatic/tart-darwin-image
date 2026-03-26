@@ -40,6 +40,7 @@ Behavior:
      moves staged images into canonical names.
 
 Safety checks:
+  - Requires root privileges for apply mode (metadata/ownership fidelity).
   - Refuses to run apply mode if VM is currently running.
   - Requires source role disks to exist.
 EOF
@@ -68,6 +69,12 @@ done
 
 if [[ "$ACTIVATE" -eq 1 && "$APPLY" -ne 1 ]]; then
   echo "--activate requires --apply" >&2
+  exit 2
+fi
+
+if [[ "$APPLY" -eq 1 && "$EUID" -ne 0 ]]; then
+  echo "Refusing --apply without root privileges." >&2
+  echo "Run with sudo to preserve ownership/ACL/xattrs metadata correctly." >&2
   exit 2
 fi
 
