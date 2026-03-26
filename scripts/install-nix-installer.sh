@@ -33,7 +33,7 @@ fi
 : "${NIX_STORE_SYSTEM_MOUNT_POINT:=/nix}"
 : "${NIX_STORE_CONFIGURE_SYNTHETIC:=1}"
 : "${NIX_STORE_CONFIGURE_FSTAB:=1}"
-: "${NIX_STORE_FSTAB_MOUNT_OPTS:=rw,noauto,nobrowse,nosuid,noatime,owners}"
+: "${NIX_STORE_FSTAB_MOUNT_OPTS:=rw,nobrowse,nosuid,noatime,owners}"
 : "${FLOX_INSTALL_WITH_NIX:=1}"
 : "${FLOX_INSTALL_REF:=github:flox/flox}"
 : "${NIX_DARWIN_INSTALL_WITH_NIX:=1}"
@@ -281,6 +281,8 @@ verify_nix_mount_matches_expected() {
   local detected=""
   local mounted_path=""
   local mounted_dev=""
+  local synthetic_target="/System/Volumes/Data${NIX_STORE_SYSTEM_MOUNT_POINT}"
+  local allow_synthetic_target=0
 
   detected="$(detect_nix_mount || true)"
   if [[ -z "${detected}" ]]; then
@@ -292,9 +294,15 @@ verify_nix_mount_matches_expected() {
 
   expected_dev="$(device_identifier_for_ref "${vol_label}")"
 
+  if [[ "${NIX_STORE_CONFIGURE_SYNTHETIC}" == "1" && "${NIX_STORE_SYSTEM_MOUNT_POINT}" == "/nix" ]]; then
+    allow_synthetic_target=1
+  fi
+
   if [[ "${require_existing}" == "1" && "${mounted_path}" != "${NIX_STORE_SYSTEM_MOUNT_POINT}" ]]; then
-    echo "Error: expected canonical ${NIX_STORE_SYSTEM_MOUNT_POINT} mountpoint, but detected '${mounted_path}'." >&2
-    return 2
+    if [[ "${allow_synthetic_target}" != "1" || "${mounted_path}" != "${synthetic_target}" ]]; then
+      echo "Error: expected ${NIX_STORE_SYSTEM_MOUNT_POINT} (or ${synthetic_target} with synthetic /nix), but detected '${mounted_path}'." >&2
+      return 2
+    fi
   fi
 
   if [[ "${require_existing}" == "1" && -n "${expected_dev}" && "${mounted_dev}" != "${expected_dev}" ]]; then
@@ -538,6 +546,7 @@ ensure_nix_custom_conf_block() {
   {
     printf '%s\n' "${block_begin}"
     printf '%s\n' 'accept-flake-config = true'
+    printf '%s\n' 'extra-experimental-features = nix-command flakes ca-derivations'
     printf '%s\n' "trusted-users = ${NIX_TRUSTED_USERS}"
     printf '%s\n' 'extra-trusted-substituters = https://cache.flox.dev'
     printf '%s\n' 'extra-trusted-public-keys = flox-cache-public-1:7F4OyH7ZCnFhcze3fJdfyXYLQw/aV7GEed86nQ7IsOs='
@@ -547,17 +556,12 @@ ensure_nix_custom_conf_block() {
 
 ensure_nix_custom_conf_block
 
-NIX_PROFILE_USER="${NIX_BOOTSTRAP_USER}"
-if [[ -z "${NIX_PROFILE_USER}" ]]; then
-  NIX_PROFILE_USER="$(id -un)"
-fi
-NIX_PROFILE_HOME="$(resolve_home_dir_for_user "${NIX_PROFILE_USER}")"
+NIX_PROFILE_DEFAULT="${NIX_STORE_SYSTEM_MOUNT_POINT}/var/nix/profiles/default"
+NIX_PROFILE_DEFAULT_BIN="${NIX_PROFILE_DEFAULT}/bin"
 
 NIX_BIN=""
 for candidate in \
-  "${NIX_STORE_SYSTEM_MOUNT_POINT}/var/nix/profiles/default/bin/nix" \
-  "${NIX_PROFILE_HOME}/.nix-profile/bin/nix" \
-  "${HOME}/.nix-profile/bin/nix" \
+  "${NIX_PROFILE_DEFAULT_BIN}/nix" \
   "$(command -v nix 2>/dev/null || true)"; do
   if [[ -n "${candidate}" && -x "${candidate}" ]]; then
     NIX_BIN="${candidate}"
@@ -570,42 +574,18 @@ if [[ -z "${NIX_BIN}" ]]; then
   exit 0
 fi
 
-ensure_profile_user_writable_state() {
-  local user="$1"
-  local home="$2"
-  local path
-
-  for path in "${home}/.cache" "${home}/.cache/nix" "${home}/.local/state/nix"; do
-    sudo mkdir -p "${path}"
-    sudo chown -R "${user}:staff" "${path}" >/dev/null 2>&1 || true
-    sudo chmod -R u+rwX "${path}" >/dev/null 2>&1 || true
-  done
-}
-
-ensure_profile_user_writable_state "${NIX_PROFILE_USER}" "${NIX_PROFILE_HOME}"
-
 run_nix_profile_add() {
   local pkg_ref="$1"
-  local nix_cmd=("${NIX_BIN}" profile add --accept-flake-config "${pkg_ref}")
-
-  if [[ "$(id -u)" -eq 0 && "${NIX_PROFILE_USER}" != "root" ]]; then
-    nix_cmd=(sudo -u "${NIX_PROFILE_USER}" -H env "HOME=${NIX_PROFILE_HOME}" "${nix_cmd[@]}")
-  fi
-  "${nix_cmd[@]}"
+  "${NIX_BIN}" profile add --profile "${NIX_PROFILE_DEFAULT}" --accept-flake-config "${pkg_ref}"
 }
 
 target_command_exists() {
   local cmd="$1"
-
-  if [[ "$(id -u)" -eq 0 && "${NIX_PROFILE_USER}" != "root" ]]; then
-    sudo -u "${NIX_PROFILE_USER}" -H env HOME="${NIX_PROFILE_HOME}" bash -lc "command -v ${cmd} >/dev/null 2>&1"
-  else
-    command -v "${cmd}" >/dev/null 2>&1
-  fi
+  [[ -x "${NIX_PROFILE_DEFAULT_BIN}/${cmd}" ]] || command -v "${cmd}" >/dev/null 2>&1
 }
 
 : "Install git via Nix profile first (required for git-based flakes/inputs)"
-if [[ -x "${NIX_STORE_SYSTEM_MOUNT_POINT}/var/nix/profiles/default/bin/git" ]] || [[ -x "${NIX_PROFILE_HOME}/.nix-profile/bin/git" ]]; then
+if [[ -x "${NIX_STORE_SYSTEM_MOUNT_POINT}/var/nix/profiles/default/bin/git" ]] || [[ -x "${NIX_PROFILE_DEFAULT_BIN}/git" ]]; then
   echo "Git already available; skipping install."
 else
   run_nix_profile_add "nixpkgs#git"
@@ -613,7 +593,7 @@ fi
 
 if [[ "${FLOX_INSTALL_WITH_NIX}" == "1" ]]; then
   : "Install Flox via Nix profile (idempotent)"
-  if target_command_exists flox || [[ -x "${NIX_STORE_SYSTEM_MOUNT_POINT}/var/nix/profiles/default/bin/flox" ]] || [[ -x "${NIX_PROFILE_HOME}/.nix-profile/bin/flox" ]]; then
+  if target_command_exists flox || [[ -x "${NIX_STORE_SYSTEM_MOUNT_POINT}/var/nix/profiles/default/bin/flox" ]] || [[ -x "${NIX_PROFILE_DEFAULT_BIN}/flox" ]]; then
     echo "Flox already available; skipping install."
   else
     run_nix_profile_add "${FLOX_INSTALL_REF}"
@@ -622,7 +602,7 @@ fi
 
 if [[ "${NIX_DARWIN_INSTALL_WITH_NIX}" == "1" ]]; then
   : "Install nix-darwin via Nix profile (idempotent)"
-  if target_command_exists darwin-rebuild || [[ -x "${NIX_STORE_SYSTEM_MOUNT_POINT}/var/nix/profiles/default/bin/darwin-rebuild" ]] || [[ -x "${NIX_PROFILE_HOME}/.nix-profile/bin/darwin-rebuild" ]]; then
+  if target_command_exists darwin-rebuild || [[ -x "${NIX_STORE_SYSTEM_MOUNT_POINT}/var/nix/profiles/default/bin/darwin-rebuild" ]] || [[ -x "${NIX_PROFILE_DEFAULT_BIN}/darwin-rebuild" ]]; then
     echo "nix-darwin already available (darwin-rebuild found); skipping install."
   else
     run_nix_profile_add "${NIX_DARWIN_INSTALL_REF}"
