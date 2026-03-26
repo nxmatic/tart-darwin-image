@@ -32,6 +32,7 @@ remake.pkg-path = "remake"
 [vars]
 # INTRO_MESSAGE = "It's gettin' Flox in here"
 TART_HOME="${FLOX_ENV_PROJECT}/.tart"
+TART_HOME_FOREIGN="${FLOX_ENV_PROJECT}/.tart-foreign"
 
 ## Activation Hook ---------------------------------------------------
 ##  ... run by _bash_ shell when you run 'flox activate'.

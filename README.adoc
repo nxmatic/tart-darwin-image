@@ -168,7 +168,7 @@ This project uses a single canonical working VM name plus explicit foreign disk-
 You can set them in `.env`:
 
 * `TART_WORKING_VM=nikopol`
-* `TART_FOREIGN_HOME=.tart.foreign`
+* `TART_HOME_FOREIGN=.tart.foreign`
 * `TART_EXTRA_DISKS_RENAMED_FROM_VM=nikopol`
 
 `Makefile` reads these values at parse time, so changing `.env` adjusts the default

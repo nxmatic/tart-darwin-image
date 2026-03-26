@@ -111,7 +111,8 @@
       }
     },
     "vars": {
-      "TART_HOME": "${FLOX_ENV_PROJECT}/.tart"
+      "TART_HOME": "${FLOX_ENV_PROJECT}/.tart",
+      "TART_HOME_FOREIGN": "${FLOX_ENV_PROJECT}/.tart-foreign"
     },
     "hook": {},
     "profile": {
@@ -2812,7 +2813,8 @@
         }
       },
       "vars": {
-        "TART_HOME": "${FLOX_ENV_PROJECT}/.tart"
+        "TART_HOME": "${FLOX_ENV_PROJECT}/.tart",
+        "TART_HOME_FOREIGN": "${FLOX_ENV_PROJECT}/.tart-foreign"
       },
       "hook": {},
       "profile": {},
